@@ -50,6 +50,8 @@ STEPS = [
     # ── 1. Index sets ──────────────────────────────────────────────────────
     step("indexing", "iLO Redfish index set + Redfish stream + default-index rotation",
          ["python3", "indexing/ilo_redfish.py"]),
+    step("indexing", "iDRAC Redfish index set + Redfish stream",
+         ["python3", "indexing/idrac_redfish.py"]),
     step("indexing", "VMware index set + repoint ESXi stream",
          ["python3", "indexing/vmware.py"]),
     step("indexing", "Palo Alto Networks index set + repoint both PANOS streams",
@@ -90,6 +92,8 @@ STEPS = [
          ["python3", "dashboards/cradlepoint.py"]),
     step("dashboards", "HPE iLO — esxi2",
          ["python3", "dashboards/ilo.py"]),
+    step("dashboards", "Dell iDRAC",
+         ["python3", "dashboards/idrac.py"]),
     step("dashboards", "VMware — vCenter & ESXi",
          ["python3", "dashboards/vmware.py"]),
     step("dashboards", "Aruba — AP225",

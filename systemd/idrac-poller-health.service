@@ -1,0 +1,23 @@
+[Unit]
+Description=Dell iDRAC Redfish → Graylog health snapshot
+After=network-online.target graylog-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=idrac-poller
+Group=idrac-poller
+EnvironmentFile=/etc/idrac-poller/env
+ExecStart=/usr/bin/python3 /opt/idrac-poller/idrac_redfish.py health
+ReadWritePaths=/var/lib/idrac-poller
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true

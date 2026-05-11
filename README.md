@@ -22,11 +22,14 @@ pipelines/
 dashboards/
   cradlepoint.py           single-page widget spec + build()
   ilo.py                   multi-page (Operational / Inventory / Trends) build
+  idrac.py                 multi-page (Operational / Inventory / Trends) — Dell mirror of ilo.py
   vmware.py                multi-page (Operational / Hosts / vCenter / Inventory)
 
 indexing/
   ilo_redfish.py           creates dedicated 'iLO Redfish' index set + stream
                            and rotates the default index.
+  idrac_redfish.py         creates 'iDRAC Redfish' index set + stream
+                           (mirrors iLO setup for the Dell iDRAC poller).
   vmware.py                creates 'VMware' index set and repoints the existing
                            ESXi stream to it (2.2M msgs/day firehose offload).
   panos.py                 'Palo Alto Networks' index set + both PANOS streams.
@@ -37,6 +40,7 @@ indexing/
 
 pollers/
   ilo_redfish.py           HPE iLO Redfish → GELF HTTP poller (snapshot + logs)
+  idrac_redfish.py         Dell iDRAC Redfish → GELF HTTP poller (snapshot + Lclog/Sel)
   setup_input.py           creates the GELF HTTP input on Graylog (one-time)
 
 tools/
@@ -55,7 +59,10 @@ pipelines/
 
 systemd/
   ilo-poller-{health,logs}.{service,timer}
-  install.sh               installs the iLO poller to /opt + /etc on the Graylog VM
+  idrac-poller-{health,logs}.{service,timer}
+  install.sh               installs both Redfish pollers (iLO + iDRAC) to
+                           /opt + /etc on the Graylog VM, with separate
+                           env files and dedicated system users per poller.
   nios-mac-export.{service,timer}
                            hourly Infoblox MAC export, lives at
                            /usr/local/sbin/nios_mac_to_graylog_csv.py on the VM.
