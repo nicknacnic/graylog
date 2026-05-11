@@ -1,15 +1,24 @@
 """Set up a NAS stream.
 
-The NAS at 10.10.0.50 sends its own syslog to the shared UDP :514 input
-(separate from the CEF DNS-events about it that go to UDDI). Three source
-forms show up depending on rDNS state at the time of parsing: `nas`,
-`nas.darknetian.com`, and bare `10.10.0.50`. ~12K msgs/day combined —
-worth lifting out of Default so a future NAS dashboard has a clean stream
-to attach to.
+The Synology at 10.10.0.50 sends DSM syslog to the shared UDP :514 input.
+The `source` field arrives as either `nas` or `nas.darknetian.com`
+depending on rDNS-cache state at parse time — both rules below are
+exact-match, joined by OR, so we capture either form.
 
-No new index set — volume is low and field cardinality is modest, default
-`graylog_*` is fine. Stream is configured to remove matches from Default
-so messages land in exactly one place.
+The IP-form `10.10.0.50` is *not* a NAS-syslog source. That traffic is
+UDDI CEF DNS-events ABOUT queries originating from the NAS, and lives
+correctly in the UDDI stream — including it here would mix two unrelated
+event families.
+
+History: the original version used matching_type=AND with a
+`gl2_source_input` rule + a regex source rule. `gl2_source_input` is a
+Graylog-internal control field and doesn't behave like a normal field
+during stream-rule evaluation — messages that should have matched landed
+in zero streams. The clean fix is matching_type=OR with two exact rules.
+
+No new index set — volume is low (a few hundred msgs/day) and field
+cardinality is modest, default `graylog_*` is fine. Stream is configured
+to remove matches from Default so messages land in exactly one place.
 
 Idempotent. Run after sourcing env.sh:
     python3 indexing/nas.py
@@ -25,8 +34,7 @@ import graylog as gl  # noqa: E402
 
 STREAM_TITLE = "NAS"
 DEFAULT_INDEX_SET_ID = "697bc531578e7b6843600cba"   # 'Default index set'
-SYSLOG_INPUT_ID = "697ef8d7eeb15b769f444708"        # 'ESXI 7 (Syslog UDP)' :514
-NAS_SOURCE_FORMS = ["nas", "nas.darknetian.com", "10.10.0.50"]
+NAS_SOURCE_FORMS = ["nas", "nas.darknetian.com"]
 
 
 def find_stream(title: str) -> dict | None:
@@ -40,32 +48,23 @@ def main() -> None:
     print(f"== Setting up '{STREAM_TITLE}' stream ==")
     existing = find_stream(STREAM_TITLE)
     if existing:
-        print(f"  stream exists: id={existing['id']}")
+        print(f"  stream exists: id={existing['id']} (rules not modified)")
         return
 
     body = {
         "title": STREAM_TITLE,
         "description": (
-            "NAS-side syslog from 10.10.0.50. Filters by source IN (nas, "
-            "nas.darknetian.com, 10.10.0.50) AND gl2_source_input = the "
-            "UDP :514 syslog input. The input-id check excludes the CEF "
-            "DNS-events about NAS (which go to the UDDI stream instead)."
+            "Synology DSM syslog from 10.10.0.50. Source matches nas OR "
+            "nas.darknetian.com (rDNS varies). 10.10.0.50 IP-form excluded "
+            "because that traffic is UDDI CEF DNS-events ABOUT the NAS."
         ),
         "index_set_id": DEFAULT_INDEX_SET_ID,
         "remove_matches_from_default_stream": True,
-        "matching_type": "AND",
+        "matching_type": "OR",
         "rules": [
-            # Must come from the syslog UDP input (not the CEF input)
-            {"field": "gl2_source_input", "type": 1, "value": SYSLOG_INPUT_ID,
-             "inverted": False, "description": "via UDP :514 syslog input"},
-            # AND source matches one of the NAS hostname/IP forms.
-            # With matching_type=AND on a single stream, we can't OR multiple
-            # source values inline — but rule type 2 is regex match, so use one
-            # regex that covers all three forms.
-            {"field": "source", "type": 2,
-             "value": "^(nas|nas\\.darknetian\\.com|10\\.10\\.0\\.50)$",
-             "inverted": False,
-             "description": "any rDNS form of the NAS host"},
+            {"field": "source", "type": 1, "value": src,
+             "inverted": False, "description": f"Synology hostname: {src}"}
+            for src in NAS_SOURCE_FORMS
         ],
     }
     resp = gl.api("POST", "streams", body)
