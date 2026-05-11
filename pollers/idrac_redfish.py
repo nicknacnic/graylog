@@ -141,6 +141,12 @@ def gelf(short_message: str, level: int = 6, **fields: Any) -> None:
     for k, v in fields.items():
         if v is None:
             continue
+        # GELF booleans are inconsistently indexed by Graylog's field-type
+        # detector — they often disappear from the search-side schema even
+        # though they're stored. Emit as the strings "true"/"false" so the
+        # dashboard's present/absent queries work reliably.
+        if isinstance(v, bool):
+            v = "true" if v else "false"
         key = k if k.startswith("_") else f"_{k}"
         msg[key] = v
     data = json.dumps(msg).encode()
@@ -330,11 +336,18 @@ def poll_drives(s: IdracSession) -> None:
         for dref in ctrl.get("Drives") or []:
             drv = s.get(dref["@odata.id"])
             dstatus = drv.get("Status") or {}
+            # iDRAC 8 on T430 drives sometimes returns Status with State but
+            # no Health key. Fall back to HealthRollup, then derive from
+            # State (Enabled→OK, anything else→Warning) so the dashboard
+            # has a value to group on.
+            health = dstatus.get("Health") or dstatus.get("HealthRollup")
+            if not health:
+                health = "OK" if dstatus.get("State") == "Enabled" else "Warning"
             life_pct = drv.get("PredictedMediaLifeLeftPercent")
             ssd_endurance_used = (100 - life_pct) if isinstance(life_pct, (int, float)) else None
             gelf(
-                f"Drive {drv.get('Name') or drv.get('Id')}: {dstatus.get('Health')} ({drv.get('Model')}, {drv.get('CapacityBytes')}B)",
-                level=SEVERITY_TO_GELF.get(dstatus.get("Health"), 6),
+                f"Drive {drv.get('Name') or drv.get('Id')}: {health} ({drv.get('Model')}, {drv.get('CapacityBytes')}B)",
+                level=SEVERITY_TO_GELF.get(health, 6),
                 idrac_event_type="drive",
                 idrac_drive_id=drv.get("Id"),
                 idrac_drive_name=drv.get("Name"),
@@ -344,7 +357,7 @@ def poll_drives(s: IdracSession) -> None:
                 idrac_drive_serial=drv.get("SerialNumber"),
                 idrac_drive_part_number=drv.get("PartNumber"),
                 idrac_drive_revision=drv.get("Revision"),
-                idrac_drive_health=dstatus.get("Health"),
+                idrac_drive_health=health,
                 idrac_drive_state=dstatus.get("State"),
                 idrac_drive_media=drv.get("MediaType"),
                 idrac_drive_protocol=drv.get("Protocol"),
@@ -361,67 +374,68 @@ def poll_drives(s: IdracSession) -> None:
 def poll_logs(s: IdracSession, state: dict) -> None:
     """Tail Lclog (Lifecycle Controller log) and Sel (System Event Log).
 
-    Both live under /redfish/v1/Managers/<id>/LogServices/. Dell numbers
-    entries with monotonically-increasing integer Ids, so we track a high
-    water mark per log and only emit anything beyond it.
+    Dell iDRAC 8 quirk: the canonical Redfish path
+    `/LogServices/<id>/Entries` returns the LogService resource itself,
+    not the entry collection. The actual entries live at the URL
+    pointed to by `LogService.Entries.@odata.id`, which on iDRAC 8 is
+    `/redfish/v1/Managers/<id>/Logs/<service>`. So we go straight there.
+
+    Dell numbers entries with monotonically-increasing integer Ids, so we
+    track a high water mark per log and only emit anything beyond it.
+    `Members@odata.count` reports the total; `Members@odata.nextLink`
+    paginates if the collection is large (Lclog often exceeds 50/page).
 
     Unlike iLO 4 (which doesn't populate `Created`), iDRAC stamps a real
     timestamp on every entry, so we don't have to skip backfill on first
     run — we just take the most recent N if state is empty.
     """
     candidates = [
-        ("lclog", f"/redfish/v1/Managers/{MANAGER_ID}/LogServices/Lclog/Entries"),
-        ("sel",   f"/redfish/v1/Managers/{MANAGER_ID}/LogServices/Sel/Entries"),
+        ("lclog", f"/redfish/v1/Managers/{MANAGER_ID}/Logs/Lclog"),
+        ("sel",   f"/redfish/v1/Managers/{MANAGER_ID}/Logs/Sel"),
     ]
-    INITIAL_BACKFILL = 100  # emit up to this many recent entries on first run per log
+    INITIAL_BACKFILL = 100
     for kind, path in candidates:
+        members: list[dict] = []
         try:
-            page = s.get(path)
+            next_path: str | None = path
+            while next_path:
+                page = s.get(next_path)
+                members.extend(page.get("Members") or [])
+                next_path = page.get("Members@odata.nextLink")
+                # Defensive guard against pathological pagination
+                if len(members) >= 5000:
+                    break
         except error.HTTPError as e:
             if e.code == 404:
                 continue
             raise
-        members = page.get("Members") or []
         last_id_key = f"{kind}_last_id"
         last_id_raw = state.get(last_id_key)
-        all_ids: list[tuple[int, str]] = []
+        all_entries: list[tuple[int, dict]] = []
         for m in members:
-            uri = m.get("@odata.id") or ""
+            eid_raw = m.get("Id")
             try:
-                eid = int(uri.rstrip("/").rsplit("/", 1)[-1])
-            except ValueError:
+                eid = int(eid_raw)
+            except (TypeError, ValueError):
                 continue
-            all_ids.append((eid, uri))
-        if not all_ids:
+            all_entries.append((eid, m))
+        if not all_entries:
             continue
         if last_id_raw is None:
-            # First run: emit up to INITIAL_BACKFILL most recent, then HWM at max
-            all_ids.sort(reverse=True)
-            recent = sorted(all_ids[:INITIAL_BACKFILL])
-            for eid, uri in recent:
-                entry = page_member_or_get(s, members, uri)
+            all_entries.sort(key=lambda t: t[0], reverse=True)
+            recent = sorted(all_entries[:INITIAL_BACKFILL], key=lambda t: t[0])
+            for eid, entry in recent:
                 _emit_log_entry(kind, entry, eid)
-            state[last_id_key] = max(eid for eid, _ in all_ids)
+            state[last_id_key] = max(eid for eid, _ in all_entries)
             continue
         last_id = int(last_id_raw)
-        new_refs = sorted([t for t in all_ids if t[0] > last_id])
+        new_entries = sorted([t for t in all_entries if t[0] > last_id], key=lambda t: t[0])
         max_id_seen = last_id
-        for eid, uri in new_refs:
-            entry = page_member_or_get(s, members, uri)
+        for eid, entry in new_entries:
             _emit_log_entry(kind, entry, eid)
             max_id_seen = max(max_id_seen, eid)
         if max_id_seen > last_id:
             state[last_id_key] = max_id_seen
-
-
-def page_member_or_get(s: IdracSession, members: list[dict], uri: str) -> dict:
-    """Dell often returns LogEntry objects inline in the Entries page —
-    if Message is already present we don't need a second GET. Falls back
-    to fetching the URI when only the @odata.id stub is there."""
-    for m in members:
-        if m.get("@odata.id") == uri and "Message" in m:
-            return m
-    return s.get(uri)
 
 
 def _emit_log_entry(kind: str, entry: dict, eid: int) -> None:
