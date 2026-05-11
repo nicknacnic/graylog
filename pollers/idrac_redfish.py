@@ -85,8 +85,12 @@ class IdracSession:
 
     def open(self) -> None:
         body = json.dumps({"UserName": IDRAC_USER, "Password": IDRAC_PASS}).encode()
+        # iDRAC 8 (Redfish 1.4) rejects POST to /redfish/v1/SessionService/Sessions
+        # with 405 — its actual session collection is at /redfish/v1/Sessions.
+        # `GET /redfish/v1/SessionService` reports `Sessions.@odata.id` =
+        # "/redfish/v1/Sessions" so this is the canonical path on this firmware.
         req = request.Request(
-            BASE + "/redfish/v1/SessionService/Sessions",
+            BASE + "/redfish/v1/Sessions",
             data=body, method="POST",
             headers={"Content-Type": "application/json", "Accept": "application/json"},
         )
