@@ -1,0 +1,23 @@
+[Unit]
+Description=HPE iLO Redfish → Graylog IML+Security log tail
+After=network-online.target graylog-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ilo-poller
+Group=ilo-poller
+EnvironmentFile=/etc/ilo-poller/env
+ExecStart=/usr/bin/python3 /opt/ilo-poller/ilo_redfish.py logs
+ReadWritePaths=/var/lib/ilo-poller
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true

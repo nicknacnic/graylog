@@ -1,0 +1,379 @@
+"""Infoblox — Operations dashboard.
+
+Complements the user's existing 'Infoblox' dashboard (which is a focused
+NX/SERVFAIL deep dive). This adds the operational + analytical cuts the
+existing one doesn't cover.
+
+Pages:
+  1. Top talkers  — who/what/where, no error filtering
+  2. DNS health   — query/response totals, NX vs SERVFAIL trends, error counts
+  3. Threat-shape — anomaly indicators: high-NX clients, rare TLDs,
+                     unusual qtype mix, query-burst detection
+  4. DHCP & ops   — UDDI/NIOS sender heartbeat, query types over time
+
+Queries the NIOS streams (gm/ddi/ns1/tr/ni) and UDDI together via the
+search-type multi-stream filter, so the widgets cover the whole DDI fabric.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import graylog as gl  # noqa: E402
+
+# All DNS-bearing streams. Order here just affects search_type primary stream id.
+NIOS_STREAMS = [
+    "697e66d3eeb15b769f4235eb",  # gm
+    "697bf15eeeb15b769f3c8567",  # ddi
+    "69939874eeb15b769f4f8ebd",  # ns1
+    "697e67bdeeb15b769f423c70",  # tr
+    "697c03f7eeb15b769f3cd51b",  # ni
+]
+UDDI_STREAM = "697c067eeeb15b769f3ce126"
+ALL_DDI_STREAMS = NIOS_STREAMS + [UDDI_STREAM]
+PRIMARY = NIOS_STREAMS[0]
+
+TITLE = "Infoblox — Operations"
+SUMMARY = "DDI fabric — DNS top talkers, health, anomalies, DHCP"
+DESCRIPTION = (
+    "Operational cuts of the Infoblox NIOS + UDDI fabric. Complements the "
+    "user's existing 'Infoblox' dashboard (NX/SERVFAIL deep dive). Queries "
+    "all 5 NIOS streams (gm/ddi/ns1/tr/ni) plus UDDI together. Key fields "
+    "extracted by pipeline rules: dns_event_type, qname, qtype, rcode, "
+    "client_ip, client_fqdn, sender_fqdn, dns_is_nxdomain, dns_is_servfail."
+)
+
+HOUR = 3600
+DAY = 86400
+WEEK = 7 * DAY
+
+
+def _ps(fn: str) -> dict:
+    return gl.parse_series_fn(fn)
+
+
+def numeric(title, query, fn, *, timerange=HOUR, pos, name="value"):
+    return {
+        "title": title, "kind": "agg", "viz": "numeric",
+        "query": query, "timerange": timerange,
+        "series": [{"config": {"name": name}, "function": fn}],
+        "pivot_series": [_ps(fn)],
+        "pos": pos,
+    }
+
+
+def line_ts(title, query, series, *, timerange=DAY, pos, column_field=None):
+    return {
+        "title": title, "kind": "agg", "viz": "line",
+        "query": query, "timerange": timerange,
+        "row_field": "timestamp", "column_field": column_field,
+        "series": [{"config": {"name": n}, "function": fn} for n, fn in series],
+        "pivot_series": [_ps(fn) for _, fn in series],
+        "pos": pos,
+    }
+
+
+def bar(title, query, *, field, pos, timerange=DAY, row_limit=15):
+    return {
+        "title": title, "kind": "agg", "viz": "bar",
+        "query": query, "timerange": timerange,
+        "row_field": field, "row_limit": row_limit, "pos": pos,
+    }
+
+
+def pie(title, query, *, field, pos, timerange=DAY, row_limit=10):
+    return {
+        "title": title, "kind": "agg", "viz": "pie",
+        "query": query, "timerange": timerange,
+        "row_field": field, "row_limit": row_limit, "pos": pos,
+    }
+
+
+def table(title, query, *, row_field, series, pos, timerange=DAY, row_limit=25):
+    return {
+        "title": title, "kind": "agg", "viz": "table",
+        "query": query, "timerange": timerange,
+        "row_field": row_field, "row_limit": row_limit,
+        "series": [{"config": {"name": n}, "function": fn} for n, fn in series],
+        "pivot_series": [_ps(fn) for _, fn in series],
+        "pos": pos,
+    }
+
+
+def msgs(title, query, *, pos, timerange=DAY):
+    return {"title": title, "kind": "messages", "query": query,
+            "timerange": timerange, "pos": pos}
+
+
+def page_top_talkers():
+    return [
+        # Row 1: headline numerics
+        numeric("Queries (24h)", "dns_event_type:query", "count()",
+                timerange=DAY, pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="q"),
+        numeric("Responses (24h)", "dns_event_type:response", "count()",
+                timerange=DAY, pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="r"),
+        numeric("Distinct clients (24h)",
+                "_exists_:client_ip", "cardinality(client_ip)",
+                timerange=DAY, pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="clients"),
+        numeric("Distinct qnames (24h)",
+                "_exists_:qname", "cardinality(qname)",
+                timerange=DAY, pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="qnames"),
+        # Row 2: top clients
+        table("Top clients by query count (24h)",
+              "_exists_:qname",
+              row_field="client_ip", row_limit=20,
+              series=[
+                  ("queries",   "count()"),
+                  ("name",      "latest(client_fqdn)"),
+                  ("hostname",  "latest(client_hostname)"),
+                  ("qnames",    "cardinality(qname)"),
+              ],
+              pos={"col": 1, "row": 3, "width": 12, "height": 5}),
+        # Row 3: top qnames + qtype mix
+        table("Top qnames (24h)",
+              "_exists_:qname AND NOT qname:\"\"",
+              row_field="qname", row_limit=20,
+              series=[
+                  ("queries", "count()"),
+                  ("clients", "cardinality(client_ip)"),
+              ],
+              pos={"col": 1, "row": 8, "width": 8, "height": 5}),
+        pie("Query types (24h)",
+            "_exists_:qtype", field="qtype",
+            pos={"col": 9, "row": 8, "width": 4, "height": 5}),
+        # Row 4: client_hostname enrichment effectiveness + qname per source
+        line_ts("Queries per NIOS server (24h)",
+                "dns_event_type:query",
+                series=[("count", "count()")],
+                column_field="source",
+                pos={"col": 1, "row": 13, "width": 12, "height": 4}),
+    ]
+
+
+def page_health():
+    return [
+        # Row 1: total + error counts. Graylog pivots can't compute
+        # cross-series percentages — these are raw counts, mentally compare
+        # the error-flavoured ones against Total to gauge the share.
+        numeric("Total messages (24h)",
+                "*", "count()", timerange=DAY,
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="total"),
+        numeric("NXDOMAIN (24h)",
+                "dns_is_nxdomain:true OR rcode:NXDOMAIN OR InfobloxDNSRCode:NXDOMAIN",
+                "count()", timerange=DAY,
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="nx"),
+        numeric("SERVFAIL (24h)",
+                "dns_is_servfail:true OR rcode:SERVFAIL OR InfobloxDNSRCode:SERVFAIL",
+                "count()", timerange=DAY,
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="sf"),
+        numeric("Errors (24h, any rcode != NOERROR)",
+                "dns_is_error:true", "count()", timerange=DAY,
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="err"),
+        # Row 2: rcode distribution over time
+        line_ts("RCODE distribution over 24h",
+                "_exists_:rcode",
+                series=[("count", "count()")],
+                column_field="rcode",
+                pos={"col": 1, "row": 3, "width": 12, "height": 4}),
+        # Row 3: query vs response rate
+        line_ts("Query vs response rate (24h)",
+                "_exists_:dns_event_type",
+                series=[("count", "count()")],
+                column_field="dns_event_type",
+                pos={"col": 1, "row": 7, "width": 12, "height": 4}),
+        # Row 4: error breakdown by client
+        table("Highest error rate clients (24h)",
+              "dns_is_error:true",
+              row_field="client_ip", row_limit=15,
+              series=[
+                  ("errors",    "count()"),
+                  ("name",      "latest(client_fqdn)"),
+                  ("hostname",  "latest(client_hostname)"),
+              ],
+              pos={"col": 1, "row": 11, "width": 12, "height": 5}),
+    ]
+
+
+def page_anomalies():
+    return [
+        # Row 1: indicator counters
+        numeric("PTR queries (24h)", "qtype:PTR", "count()",
+                timerange=DAY, pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="ptr"),
+        numeric("HTTPS qtype (24h)", "qtype:HTTPS", "count()",
+                timerange=DAY, pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="https"),
+        numeric("SVCB qtype (24h)", "qtype:SVCB", "count()",
+                timerange=DAY, pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="svcb"),
+        numeric("AAAA queries (24h)", "qtype:AAAA", "count()",
+                timerange=DAY, pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="aaaa"),
+        # Row 2: top NX qnames overall (without the nas filter — that's in user's existing dashboard)
+        table("Top NX qnames (24h) — fleet-wide",
+              "dns_is_nxdomain:true OR rcode:NXDOMAIN OR InfobloxDNSRCode:NXDOMAIN",
+              row_field="qname", row_limit=20,
+              series=[
+                  ("hits",    "count()"),
+                  ("clients", "cardinality(client_ip)"),
+              ],
+              pos={"col": 1, "row": 3, "width": 12, "height": 5}),
+        # Row 3: clients with highest NX ratio (likely scanners or misconfigs)
+        table("Top NX-emitting clients (24h)",
+              "dns_is_nxdomain:true OR rcode:NXDOMAIN OR InfobloxDNSRCode:NXDOMAIN",
+              row_field="client_ip", row_limit=15,
+              series=[
+                  ("nx_hits", "count()"),
+                  ("name",    "latest(client_fqdn)"),
+                  ("hostname", "latest(client_hostname)"),
+                  ("uniq_qnames", "cardinality(qname)"),
+              ],
+              pos={"col": 1, "row": 8, "width": 12, "height": 5}),
+        # Row 4: oddities (BADCOOKIE etc — observed in your data)
+        bar("Unusual rcodes (24h, excl. NOERROR/NXDOMAIN)",
+            "_exists_:rcode AND NOT rcode:NOERROR AND NOT rcode:NXDOMAIN AND NOT rcode:SERVFAIL",
+            field="rcode",
+            pos={"col": 1, "row": 13, "width": 6, "height": 4}),
+        msgs("Unusual rcode messages (24h)",
+             "_exists_:rcode AND NOT rcode:NOERROR AND NOT rcode:NXDOMAIN AND NOT rcode:SERVFAIL",
+             timerange=DAY, pos={"col": 7, "row": 13, "width": 6, "height": 4}),
+    ]
+
+
+def page_dhcp_ops():
+    return [
+        # Row 1: sender (which NIOS appliances are talking)
+        numeric("Total DDI messages (24h)", "*", "count()", timerange=DAY,
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="msgs"),
+        numeric("Distinct NIOS sources (24h)",
+                "*", "cardinality(source)", timerange=DAY,
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="src"),
+        numeric("UDDI events (24h)",
+                "_exists_:deviceAddress", "count()", timerange=DAY,
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="uddi"),
+        numeric("DHCP-port (67/68) traffic (24h)",
+                "dns_client_port:67 OR dns_client_port:68",
+                "count()", timerange=DAY,
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="dhcp"),
+        # Row 2: per-NIOS rate
+        line_ts("Per-appliance message rate (24h)",
+                "*",
+                series=[("count", "count()")],
+                column_field="source",
+                pos={"col": 1, "row": 3, "width": 12, "height": 4}),
+        # Row 3: source table — health/heartbeat for each NIOS member
+        table("NIOS / UDDI appliances seen (24h)",
+              "*",
+              row_field="source", row_limit=20,
+              series=[
+                  ("messages", "count()"),
+                  ("clients",  "cardinality(client_ip)"),
+                  ("qnames",   "cardinality(qname)"),
+                  ("fqdn",     "latest(sender_fqdn)"),
+              ],
+              pos={"col": 1, "row": 7, "width": 12, "height": 5}),
+        # Row 4: UDDI vs NIOS qtype mix
+        bar("UDDI-only qtype mix (24h)",
+            "_exists_:deviceAddress AND _exists_:qtype",
+            field="qtype",
+            pos={"col": 1, "row": 12, "width": 6, "height": 4}),
+        bar("NIOS-only qtype mix (24h)",
+            "NOT _exists_:deviceAddress AND _exists_:qtype",
+            field="qtype",
+            pos={"col": 7, "row": 12, "width": 6, "height": 4}),
+    ]
+
+
+# ── build / apply: multi-stream ──────────────────────────────────────────────
+
+def build_pages_multi(specs, default_timerange_s):
+    """Like gl.build_widgets_for_page but the search-type queries across all
+    DDI streams instead of just one."""
+    search_types, widgets, positions, titles, widget_mapping = [], [], {}, {}, {}
+    for s in specs:
+        wid, stid = gl.gen_id(), gl.gen_id()
+        timerange = s.get("timerange", default_timerange_s)
+        query = s.get("query", "")
+        if s["kind"] == "agg":
+            ps = gl.align_pivot_ids(s.get("series", []), s.get("pivot_series", []))
+            st = gl.pivot(
+                search_type_id=stid, stream_id=PRIMARY,
+                query=query, timerange_s=timerange,
+                row_field=s.get("row_field"),
+                column_field=s.get("column_field"),
+                series=ps,
+                row_limit=s.get("row_limit", 25),
+                column_limit=s.get("column_limit", 25),
+            )
+            st["streams"] = ALL_DDI_STREAMS
+            search_types.append(st)
+            w = gl.widget_aggregation(
+                widget_id=wid, stream_id=PRIMARY,
+                query=query, timerange_s=timerange,
+                row_field=s.get("row_field"),
+                column_field=s.get("column_field"),
+                series=s.get("series"),
+                visualization=s["viz"],
+                row_limit=s.get("row_limit", 25),
+                column_limit=s.get("column_limit", 25),
+            )
+            w["streams"] = ALL_DDI_STREAMS
+            widgets.append(w)
+        elif s["kind"] == "messages":
+            st = gl.messages_searchtype(
+                search_type_id=stid, stream_id=PRIMARY,
+                query=query, timerange_s=timerange,
+            )
+            st["streams"] = ALL_DDI_STREAMS
+            search_types.append(st)
+            w = gl.widget_messages(
+                widget_id=wid, stream_id=PRIMARY,
+                query=query, timerange_s=timerange,
+            )
+            w["streams"] = ALL_DDI_STREAMS
+            widgets.append(w)
+        else:
+            raise ValueError(f"unknown widget kind: {s['kind']}")
+        positions[wid] = s["pos"]
+        titles[wid] = s["title"]
+        widget_mapping[wid] = [stid]
+    return search_types, widgets, positions, titles, widget_mapping
+
+
+def build():
+    page_defs = [
+        ("Top talkers",    page_top_talkers, DAY),
+        ("DNS health",     page_health,      DAY),
+        ("Anomalies",      page_anomalies,   DAY),
+        ("DHCP & ops",     page_dhcp_ops,    DAY),
+    ]
+    pages_for_search, pages_for_view = [], []
+    for title, fn, tr in page_defs:
+        qid = gl.gen_id()
+        sts, ws, pos, ti, wm = build_pages_multi(fn(), tr)
+        pages_for_search.append({"query_id": qid, "search_types": sts, "timerange_s": tr})
+        pages_for_view.append({
+            "query_id": qid, "title": title,
+            "widgets": ws, "positions": pos, "titles": ti, "widget_mapping": wm,
+        })
+
+    existing = gl.api("GET", "views?per_page=200") or {}
+    for v in existing.get("views", []):
+        if v.get("title") == TITLE and v.get("type") == "DASHBOARD":
+            print(f"deleting prior dashboard id={v['id']}")
+            gl.api("DELETE", f"views/{v['id']}")
+
+    search = gl.build_search_multipage(pages_for_search)
+    sresp = gl.api("POST", "views/search", search)
+    print(f"search id: {sresp['id']}")
+
+    view = gl.build_view_multipage(
+        title=TITLE, summary=SUMMARY, description=DESCRIPTION,
+        search_id=sresp["id"], pages=pages_for_view,
+    )
+    vresp = gl.api("POST", "views", view)
+    print(f"view id:   {vresp['id']}")
+    import os
+    print(f"open:      {os.environ['GRAYLOG_URL'].rsplit('/api', 1)[0]}/dashboards/{vresp['id']}")
+
+
+if __name__ == "__main__":
+    build()

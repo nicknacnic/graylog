@@ -1,0 +1,46 @@
+{
+  "pipeline": {
+    "title": "Cradlepoint",
+    "description": "E300 / LTE router",
+    "stages": [
+      {
+        "stage": 0,
+        "match": "EITHER",
+        "rules": [
+          "cp parse signal",
+          "cp parse client connect",
+          "cp parse gps",
+          "cp parse cell id",
+          "cp parse wan dhcp"
+        ]
+      }
+    ]
+  },
+  "rules": [
+    {
+      "title": "cp parse signal",
+      "description": "Extract LTE/5G signal metrics from periodic 'signal Internal <modem>' reports. Match any modem-identifier (CND, C4D, etc.) — the E300 changes this label between firmware/SIM variants.",
+      "source": "rule \"cp parse signal\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.message), \"signal Internal\") &&\n  contains(to_string($message.message), \"SS:\")\nthen\n  let msg = to_string($message.message);\n  let modem = regex(\"signal\\\\s+Internal\\\\s+([A-Z0-9]+)\", msg);\n  set_field(\"cp_modem\", modem[\"0\"]);\n  let sim = regex(\"\\\\(SIM([0-9]+)\\\\)\", msg);\n  set_field(\"cp_sim\", to_long(sim[\"0\"], 0));\n  let ss = regex(\"SS:\\\\s*([0-9]+)%\", msg);\n  set_field(\"cp_signal_strength\", to_long(ss[\"0\"], 0));\n  let rssi = regex(\"RSSI:\\\\s*(-?[0-9.]+)\", msg);\n  set_field(\"cp_rssi\", to_double(rssi[\"0\"], 0.0));\n  let sinr = regex(\"SINR:\\\\s*(-?[0-9.]+)\", msg);\n  set_field(\"cp_sinr\", to_double(sinr[\"0\"], 0.0));\n  let rsrp = regex(\"RSRP:\\\\s*(-?[0-9.]+)\", msg);\n  set_field(\"cp_rsrp\", to_double(rsrp[\"0\"], 0.0));\n  let rsrq = regex(\"RSRQ:\\\\s*(-?[0-9.]+)\", msg);\n  set_field(\"cp_rsrq\", to_double(rsrq[\"0\"], 0.0));\n  let band = regex(\"RFBAND:\\\\s*Band\\\\s+([0-9]+)\", msg);\n  set_field(\"cp_rfband\", to_long(band[\"0\"], 0));\n  let svc = regex(\"Service:\\\\s*([A-Za-z0-9]+)\", msg);\n  set_field(\"cp_service\", svc[\"0\"]);\n  set_field(\"cp_event_type\", \"signal_report\");\nend"
+    },
+    {
+      "title": "cp parse client connect",
+      "description": "Extract new-client IP/MAC and running total client count",
+      "source": "rule \"cp parse client connect\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.message), \"client data usage: found new client\")\nthen\n  let msg = to_string($message.message);\n  let m = regex(\"ip=([0-9.]+)\\\\s+mac=([0-9a-f:]+)\\\\s+\\\\(([0-9]+)\\\\s+clients\\\\)\", msg);\n  set_field(\"cp_new_client_ip\", m[\"0\"]);\n  set_field(\"cp_new_client_mac\", m[\"1\"]);\n  set_field(\"cp_client_count\", to_long(m[\"2\"], 0));\n  set_field(\"cp_event_type\", \"new_client\");\nend"
+    },
+    {
+      "title": "cp parse gps",
+      "description": "Extract GPS lat/lng/lock from NCM Location Services events",
+      "source": "rule \"cp parse gps\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.message), \"NCM Location Services\")\nthen\n  let msg = to_string($message.message);\n  let lat = regex(\"lat:\\\\s*(-?[0-9.]+)\", msg);\n  set_field(\"cp_gps_lat\", to_double(lat[\"0\"], 0.0));\n  let lng = regex(\"lng:\\\\s*(-?[0-9.]+)\", msg);\n  set_field(\"cp_gps_lng\", to_double(lng[\"0\"], 0.0));\n  let lock = regex(\"lock:\\\\s*(True|False)\", msg);\n  set_field(\"cp_gps_lock\", lock[\"0\"]);\n  set_field(\"cp_event_type\", \"gps_status\");\nend"
+    },
+    {
+      "title": "cp parse cell id",
+      "description": "Extract cellular cell-id transitions for the LTE modem. Matches any modem identifier (CND, C4D, etc).",
+      "source": "rule \"cp parse cell id\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.message), \"The cell id for the Internal\")\nthen\n  let msg = to_string($message.message);\n  let m = regex(\"port\\\\s+int[0-9]+\\\\s+is\\\\s+(.+)$\", msg);\n  set_field(\"cp_cell_id\", m[\"0\"]);\n  set_field(\"cp_event_type\", \"cell_id\");\nend"
+    },
+    {
+      "title": "cp parse wan dhcp",
+      "description": "Extract WAN-side DHCP lease information when the modem renews IP",
+      "source": "rule \"cp parse wan dhcp\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.message), \"WAN:\") &&\n  contains(to_string($message.message), \"DHCP:\") &&\n  contains(to_string($message.message), \"ipinfo=\")\nthen\n  let msg = to_string($message.message);\n  let gw = regex(\"'gateway':\\\\s*'([0-9.]+)'\", msg);\n  set_field(\"cp_wan_gateway\", gw[\"0\"]);\n  let ip = regex(\"'ip_address':\\\\s*'([0-9.]+)'\", msg);\n  set_field(\"cp_wan_ip\", ip[\"0\"]);\n  set_field(\"cp_event_type\", \"wan_dhcp\");\nend"
+    }
+  ]
+}

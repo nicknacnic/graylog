@@ -1,0 +1,40 @@
+{
+  "pipeline": {
+    "title": "MAC Enrichment",
+    "description": "Normalize per-source MAC fields (cp_new_client_mac, aruba_client_mac, ...) into a unified `client_mac`, then resolve to a DHCP hostname via the infoblox-nios-mac lookup table. Mirrors the IPAM-enrichment pattern but for MAC addresses.",
+    "stages": [
+      {
+        "stage": 1,
+        "match": "EITHER",
+        "rules": [
+          "mac normalize client_mac from cp_new_client_mac",
+          "mac normalize client_mac from aruba_client_mac"
+        ]
+      },
+      {
+        "stage": 2,
+        "match": "EITHER",
+        "rules": [
+          "mac enrich client_mac"
+        ]
+      }
+    ]
+  },
+  "rules": [
+    {
+      "title": "mac normalize client_mac from cp_new_client_mac",
+      "description": "Cradlepoint client-connect events expose the MAC as cp_new_client_mac. Promote it to the unified client_mac field.",
+      "source": "rule \"mac normalize client_mac from cp_new_client_mac\"\nwhen\n  has_field(\"cp_new_client_mac\") &&\n  !has_field(\"client_mac\")\nthen\n  set_field(\"client_mac\", to_string($message.cp_new_client_mac));\nend"
+    },
+    {
+      "title": "mac normalize client_mac from aruba_client_mac",
+      "description": "Aruba AP station events expose the MAC as aruba_client_mac. Promote to client_mac.",
+      "source": "rule \"mac normalize client_mac from aruba_client_mac\"\nwhen\n  has_field(\"aruba_client_mac\") &&\n  !has_field(\"client_mac\")\nthen\n  set_field(\"client_mac\", to_string($message.aruba_client_mac));\nend"
+    },
+    {
+      "title": "mac enrich client_mac",
+      "description": "Resolve client_mac to its DHCP-assigned hostname via the infoblox-nios-mac lookup table (CSV synced hourly from NIOS fixedaddrs+leases by /usr/local/sbin/nios_mac_to_graylog_csv.py).",
+      "source": "rule \"mac enrich client_mac\"\nwhen\n  has_field(\"client_mac\")\nthen\n  let mac = lowercase(to_string($message.client_mac));\n  let host = lookup_value(\"infoblox-nios-mac\", mac);\n  set_field(\"client_hostname\", to_string(host));\nend"
+    }
+  ]
+}

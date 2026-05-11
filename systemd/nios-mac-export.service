@@ -1,0 +1,17 @@
+[Unit]
+Description=Export Infoblox NIOS MAC→hostname (fixedaddrs + leases) to Graylog CSV lookup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/graylog/nios-export.env
+Environment=MAC_OUT_PATH=/etc/graylog/server/lookups/mac_to_hostname.csv
+ExecStart=/usr/local/sbin/nios_mac_to_graylog_csv.py
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/etc/graylog/server/lookups

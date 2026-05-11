@@ -1,0 +1,28 @@
+{
+  "pipeline": {
+    "title": "ESXI",
+    "description": "VMware/vSphere extraction. Fills vmware_app from application_name when set (vCenter), else parses the leading syslog tag (ESXi hosts: Hostd, snmpd, Vpxa, vmkernel, etc.)",
+    "stages": [
+      {
+        "stage": 0,
+        "match": "EITHER",
+        "rules": [
+          "vmware app from application_name",
+          "vmware app from message"
+        ]
+      }
+    ]
+  },
+  "rules": [
+    {
+      "title": "vmware app from application_name",
+      "description": "vCenter messages already have application_name extracted by Graylog. Copy to vmware_app for unified dashboard use.",
+      "source": "rule \"vmware app from application_name\"\nwhen\n  has_field(\"application_name\")\nthen\n  set_field(\"vmware_app\", to_string($message.application_name));\nend"
+    },
+    {
+      "title": "vmware app from message",
+      "description": "ESXi host syslog (Hostd, snmpd, Vpxa, vmkernel, etc) doesn't get application_name parsed because the format is '<host> <app>[pid]?: ...'. Regex out the tag and set vmware_app.",
+      "source": "rule \"vmware app from message\"\nwhen\n  has_field(\"message\") &&\n  !has_field(\"application_name\")\nthen\n  let msg = to_string($message.message);\n  let m = regex(\"^[A-Za-z0-9._-]+\\\\s+([A-Za-z][A-Za-z0-9_-]*)(\\\\[[0-9]+\\\\])?:\", msg);\n  let app = to_string(m[\"0\"], \"\");\n  set_field(\"vmware_app\", app);\nend"
+    }
+  ]
+}

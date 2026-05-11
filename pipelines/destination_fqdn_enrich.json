@@ -1,0 +1,10 @@
+{
+  "_note": "Standalone rule definition for the destination_fqdn enrichment. The rule itself is POSTed to Graylog as a regular pipeline rule, but it lives inside the user's existing 'Enrichment' pipeline (id 697f0960eeb15b769f4470a3) at stage 2, alongside the existing 'ipam enrich client_ip' and 'ipam enrich sender_ip to sender_fqdn' rules. Re-applying via pipelines/apply.py would NOT work here — apply.py creates or replaces a whole pipeline, but this rule needs to be spliced into a user-managed pipeline. To redeploy, run pipelines/extend_enrichment_destination.py (or POST the rule + PUT the pipeline source manually).",
+  "rules": [
+    {
+      "title": "ipam enrich destination_ip to destination_fqdn",
+      "description": "Mirror of 'ipam enrich client_ip' but for destination_ip. Resolves internal destinations to their PTR-recorded FQDN via the infoblox-nios-ptr lookup table. External IPs return 'unknown' (Infoblox lookup default). Lets dashboards show destination_fqdn alongside raw IPs for internal LAN traffic.",
+      "source": "rule \"ipam enrich destination_ip to destination_fqdn\"\nwhen\n  has_field(\"destination_ip\")\nthen\n  let ip = to_string($message.destination_ip);\n  let fqdn = lookup_value(\"infoblox-nios-ptr\", ip);\n  set_field(\"destination_fqdn\", to_string(fqdn));\nend"
+    }
+  ]
+}

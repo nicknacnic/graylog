@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Infoblox MAC export hourly
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1h
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,52 @@
+{
+  "pipeline": {
+    "title": "Aruba",
+    "description": "Aruba IAP syslog extraction. Pulls process/pid, Aruba event id and severity tag (<NNNNNN> <SEV>), AP identity (name, IP, MAC), and station-event fields (client MAC, BSSID, ESSID) where present. Also categorizes into aruba_event_type for clean dashboard slicing.",
+    "stages": [
+      {
+        "stage": 0,
+        "match": "EITHER",
+        "rules": [
+          "aruba extract base",
+          "aruba extract station",
+          "aruba event type assoc",
+          "aruba event type sta_update",
+          "aruba event type sta_online",
+          "aruba event type drt"
+        ]
+      }
+    ]
+  },
+  "rules": [
+    {
+      "title": "aruba extract base",
+      "description": "Pull process/pid, Aruba <event-id> <SEVERITY>, and the AP IP+MAC tag.",
+      "source": "rule \"aruba extract base\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.source), \"aruba\")\nthen\n  let msg = to_string($message.message);\n  let proc = regex(\"([a-z]+)\\\\[([0-9]+)\\\\]:\", msg);\n  set_field(\"aruba_process\", proc[\"0\"]);\n  let eid = regex(\"<([0-9]+)>\\\\s+<([A-Z]+)>\", msg);\n  set_field(\"aruba_event_id\", eid[\"0\"]);\n  set_field(\"aruba_severity\", eid[\"1\"]);\n  let ap = regex(\"AP:(\\\\S+)\\\\s+<([0-9.]+)\\\\s+([0-9a-fA-F:]+)>\", msg);\n  set_field(\"aruba_ap_name\", ap[\"0\"]);\n  set_field(\"aruba_ap_ip\", ap[\"1\"]);\n  set_field(\"aruba_ap_mac\", ap[\"2\"]);\nend"
+    },
+    {
+      "title": "aruba extract station",
+      "description": "When the message references a wifi client (mac-..., bssid-..., essid-...), pull those fields.",
+      "source": "rule \"aruba extract station\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.source), \"aruba\") &&\n  contains(to_string($message.message), \"mac-\")\nthen\n  let msg = to_string($message.message);\n  let m = regex(\"mac-([0-9a-fA-F:]+)\", msg);\n  set_field(\"aruba_client_mac\", m[\"0\"]);\n  let b = regex(\"bssid-([0-9a-fA-F:]+)\", msg);\n  set_field(\"aruba_bssid\", b[\"0\"]);\n  let e = regex(\"essid-(\\\\S+?)(?:\\\\s|$)\", msg);\n  set_field(\"aruba_essid\", e[\"0\"]);\nend"
+    },
+    {
+      "title": "aruba event type assoc",
+      "description": "Tag client-association request events.",
+      "source": "rule \"aruba event type assoc\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.source), \"aruba\") &&\n  contains(to_string($message.message), \"Assoc request\")\nthen\n  set_field(\"aruba_event_type\", \"client_assoc\");\nend"
+    },
+    {
+      "title": "aruba event type sta_update",
+      "description": "Tag periodic station-state update events.",
+      "source": "rule \"aruba event type sta_update\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.source), \"aruba\") &&\n  contains(to_string($message.message), \"recv_stm_sta_update\")\nthen\n  set_field(\"aruba_event_type\", \"station_update\");\nend"
+    },
+    {
+      "title": "aruba event type sta_online",
+      "description": "Tag station-online (client active) events.",
+      "source": "rule \"aruba event type sta_online\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.source), \"aruba\") &&\n  contains(to_string($message.message), \"recv_sta_online\")\nthen\n  set_field(\"aruba_event_type\", \"station_online\");\nend"
+    },
+    {
+      "title": "aruba event type drt",
+      "description": "Tag DRT (downloadable regulatory table) version-check noise so the dashboard can filter it out.",
+      "source": "rule \"aruba event type drt\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.source), \"aruba\") &&\n  contains(to_string($message.message), \"drt version\")\nthen\n  set_field(\"aruba_event_type\", \"drt_version\");\nend"
+    }
+  ]
+}
