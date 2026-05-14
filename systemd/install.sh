@@ -105,14 +105,57 @@ EOF
 
 install_cf_poller
 
+# Auto-rotate watchdog: watches Graylog's indexer-failures count and
+# rotates the offending index set when it spikes. Same single-unit
+# shape as cf-poller.
+install_auto_rotate() {
+  local user=graylog-auto-rotate
+  local src=tools/auto_rotate_on_failures.py
+
+  if [[ ! -f "$src" ]]; then
+    echo "skip graylog-auto-rotate (no $src in repo)"
+    return
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -o root -g root -m 0755 /opt/graylog-auto-rotate
+  install -m 0755 "$src" /opt/graylog-auto-rotate/
+  install -d -o "$user" -g "$user" -m 0750 /var/lib/graylog-auto-rotate
+  install -d -o root -g "$user" -m 0750 /etc/graylog-auto-rotate
+  if [[ ! -f /etc/graylog-auto-rotate/env ]]; then
+    cat > /etc/graylog-auto-rotate/env <<'EOF'
+# Graylog API endpoint + token. The token must have permission to:
+#   - GET /system/indexer/failures
+#   - GET /system/indices/index_sets
+#   - POST /system/deflector/{id}/cycle
+# An admin-scope token works.
+GRAYLOG_URL=https://graylog.darknetian.com/api
+GRAYLOG_TOKEN=
+# Threshold + cooldown — tune for your workload.
+SPIKE_THRESHOLD=500
+COOLDOWN_S=1800
+EOF
+    chmod 0640 /etc/graylog-auto-rotate/env
+    chown root:"$user" /etc/graylog-auto-rotate/env
+    echo "NOTE: edit /etc/graylog-auto-rotate/env to add GRAYLOG_TOKEN"
+  fi
+  install -m 0644 systemd/graylog-auto-rotate.service /etc/systemd/system/
+  install -m 0644 systemd/graylog-auto-rotate.timer   /etc/systemd/system/
+}
+
+install_auto_rotate
+
 systemctl daemon-reload
 systemctl enable --now \
   ilo-poller-health.timer ilo-poller-logs.timer \
   idrac-poller-health.timer idrac-poller-logs.timer \
-  cf-poller.timer
+  cf-poller.timer \
+  graylog-auto-rotate.timer
 
 echo "installed. Status:"
 systemctl --no-pager status \
   ilo-poller-health.timer ilo-poller-logs.timer \
   idrac-poller-health.timer idrac-poller-logs.timer \
-  cf-poller.timer || true
+  cf-poller.timer \
+  graylog-auto-rotate.timer || true

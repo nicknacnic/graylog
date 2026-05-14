@@ -1,0 +1,23 @@
+[Unit]
+Description=Auto-rotate Graylog index sets when indexer failures spike
+After=network-online.target graylog-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=graylog-auto-rotate
+Group=graylog-auto-rotate
+EnvironmentFile=/etc/graylog-auto-rotate/env
+ExecStart=/usr/bin/python3 /opt/graylog-auto-rotate/auto_rotate_on_failures.py
+ReadWritePaths=/var/lib/graylog-auto-rotate
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
