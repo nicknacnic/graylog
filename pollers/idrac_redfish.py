@@ -1,7 +1,7 @@
 """Dell iDRAC Redfish → Graylog (GELF HTTP) poller.
 
 Targets iDRAC 8 (Redfish 1.4 — confirmed on the homelab box at
-idrac.darknetian.com / 10.10.0.6, service tag DTMZ942). Should also work on
+idrac.darknetian.com / 10.10.0.6, a PowerEdge T430). Should also work on
 iDRAC 9 with the same endpoints — Dell kept `System.Embedded.1` and
 `iDRAC.Embedded.1` as canonical IDs across versions.
 

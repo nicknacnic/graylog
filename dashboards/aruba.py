@@ -21,7 +21,7 @@ import graylog as gl  # noqa: E402
 
 STREAM_ID = "6a020a676bb644169285d513"  # Aruba AP stream
 TITLE = "Aruba — AP225"
-SUMMARY = "Single AP (40:E3:D6:C6:F3:2A) at 10.10.0.172, IAP mode"
+SUMMARY = "Single AP at 10.10.0.172, IAP mode"
 DESCRIPTION = (
     "Native syslog from the Aruba AP225 in Instant mode. Fields prefixed "
     "aruba_* are extracted by the Aruba pipeline. The AP is silent until "
