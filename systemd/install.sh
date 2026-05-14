@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the iLO + iDRAC Redfish pollers on the Graylog Ubuntu VM.
+# Install the homelab pollers on the Graylog Ubuntu VM.
 # Run as root on the Graylog VM after copying this whole repo there.
 #
 #   sudo bash systemd/install.sh
@@ -8,6 +8,7 @@
 # empty template if missing):
 #   /etc/ilo-poller/env       — ILO_HOST / ILO_USER / ILO_PASS
 #   /etc/idrac-poller/env     — IDRAC_HOST / IDRAC_USER / IDRAC_PASS
+#   /etc/cf-poller/env        — CF_API_TOKEN (scoped read-only token)
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -67,12 +68,51 @@ EOF
 install_poller ilo   ILO
 install_poller idrac IDRAC
 
+# Cloudflare poller — different shape (single unit, not health+logs pair).
+install_cf_poller() {
+  local user=cf-poller
+  local src=pollers/cloudflare_poller.py
+
+  if [[ ! -f "$src" ]]; then
+    echo "skip cf-poller (no $src in repo)"
+    return
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -o root -g root -m 0755 /opt/cf-poller
+  install -m 0755 "$src" /opt/cf-poller/
+  install -d -o "$user" -g "$user" -m 0750 /var/lib/cf-poller
+  install -d -o root -g "$user" -m 0750 /etc/cf-poller
+  if [[ ! -f /etc/cf-poller/env ]]; then
+    cat > /etc/cf-poller/env <<'EOF'
+# Cloudflare API token (Zone Read + Analytics Read + Firewall Read +
+# Account Audit Logs Read). Generate at
+# https://dash.cloudflare.com/profile/api-tokens
+CF_API_TOKEN=
+GELF_URL=http://127.0.0.1:12202/gelf
+# Optional CSV override; otherwise the poller auto-discovers all zones
+# the token can see:
+# CF_ZONES=darknetian.com,darknetian.net
+EOF
+    chmod 0640 /etc/cf-poller/env
+    chown root:"$user" /etc/cf-poller/env
+    echo "NOTE: edit /etc/cf-poller/env to add CF_API_TOKEN"
+  fi
+  install -m 0644 systemd/cf-poller.service /etc/systemd/system/
+  install -m 0644 systemd/cf-poller.timer   /etc/systemd/system/
+}
+
+install_cf_poller
+
 systemctl daemon-reload
 systemctl enable --now \
   ilo-poller-health.timer ilo-poller-logs.timer \
-  idrac-poller-health.timer idrac-poller-logs.timer
+  idrac-poller-health.timer idrac-poller-logs.timer \
+  cf-poller.timer
 
 echo "installed. Status:"
 systemctl --no-pager status \
   ilo-poller-health.timer ilo-poller-logs.timer \
-  idrac-poller-health.timer idrac-poller-logs.timer || true
+  idrac-poller-health.timer idrac-poller-logs.timer \
+  cf-poller.timer || true

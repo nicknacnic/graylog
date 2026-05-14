@@ -1,0 +1,23 @@
+[Unit]
+Description=Cloudflare → Graylog GraphQL Analytics + Firewall + Audit poller
+After=network-online.target graylog-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cf-poller
+Group=cf-poller
+EnvironmentFile=/etc/cf-poller/env
+ExecStart=/usr/bin/python3 /opt/cf-poller/cloudflare_poller.py
+ReadWritePaths=/var/lib/cf-poller
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true

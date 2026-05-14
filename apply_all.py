@@ -64,6 +64,8 @@ STEPS = [
          ["python3", "indexing/aruba.py"]),
     step("indexing", "NAS stream (default index — syslog from 10.10.0.50)",
          ["python3", "indexing/nas.py"]),
+    step("indexing", "Cloudflare index set + stream",
+         ["python3", "indexing/cloudflare.py"]),
 
     # ── 2. Inputs ──────────────────────────────────────────────────────────
     step("inputs", "GELF HTTP input on 127.0.0.1:12202 (for iLO poller)",
@@ -94,6 +96,8 @@ STEPS = [
          ["python3", "dashboards/ilo.py"]),
     step("dashboards", "Dell iDRAC",
          ["python3", "dashboards/idrac.py"]),
+    step("dashboards", "Cloudflare",
+         ["python3", "dashboards/cloudflare.py"]),
     step("dashboards", "VMware — vCenter & ESXi",
          ["python3", "dashboards/vmware.py"]),
     step("dashboards", "Aruba — AP225",

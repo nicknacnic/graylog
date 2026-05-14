@@ -24,12 +24,15 @@ dashboards/
   ilo.py                   multi-page (Operational / Inventory / Trends) build
   idrac.py                 multi-page (Operational / Inventory / Trends) — Dell mirror of ilo.py
   vmware.py                multi-page (Operational / Hosts / vCenter / Inventory)
+  cloudflare.py            multi-page (Traffic / Threats / DNS & Audit)
 
 indexing/
   ilo_redfish.py           creates dedicated 'iLO Redfish' index set + stream
                            and rotates the default index.
   idrac_redfish.py         creates 'iDRAC Redfish' index set + stream
                            (mirrors iLO setup for the Dell iDRAC poller).
+  cloudflare.py            creates 'Cloudflare' index set + stream (matches any
+                           source starting with 'cloudflare-').
   vmware.py                creates 'VMware' index set and repoints the existing
                            ESXi stream to it (2.2M msgs/day firehose offload).
   panos.py                 'Palo Alto Networks' index set + both PANOS streams.
@@ -41,6 +44,9 @@ indexing/
 pollers/
   ilo_redfish.py           HPE iLO Redfish → GELF HTTP poller (snapshot + logs)
   idrac_redfish.py         Dell iDRAC Redfish → GELF HTTP poller (snapshot + Lclog/Sel)
+  cloudflare_poller.py     Cloudflare GraphQL Analytics + Firewall + Audit Logs poller
+                           — auto-discovers all zones the token can see and emits
+                           per-zone aggregated 5-min buckets + per-event firewall feed.
   setup_input.py           creates the GELF HTTP input on Graylog (one-time)
 
 tools/
@@ -60,8 +66,9 @@ pipelines/
 systemd/
   ilo-poller-{health,logs}.{service,timer}
   idrac-poller-{health,logs}.{service,timer}
-  install.sh               installs both Redfish pollers (iLO + iDRAC) to
-                           /opt + /etc on the Graylog VM, with separate
+  cf-poller.{service,timer}     (single 5-min unit, not health+logs)
+  install.sh               installs all three pollers (iLO, iDRAC, Cloudflare)
+                           to /opt + /etc on the Graylog VM, with separate
                            env files and dedicated system users per poller.
   nios-mac-export.{service,timer}
                            hourly Infoblox MAC export, lives at
