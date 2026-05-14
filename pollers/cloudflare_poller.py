@@ -196,8 +196,12 @@ def poll_zone_info(zone: dict) -> None:
 def poll_http_requests(zone: dict, start: str, end: str) -> None:
     """5-minute HTTP request buckets per zone via httpRequestsAdaptiveGroups.
 
-    Emit one event per bucket. Dashboard groups on cf_zone_name +
-    timestamp for trend lines, on cf_status for status-class breakdowns.
+    Schema gotcha (introspected against live CF 2026-05 schema): the
+    request total is the top-level `count` field, NOT `sum.requests`
+    (which doesn't exist). `sum` holds `edgeRequestBytes`,
+    `edgeResponseBytes`, `visits`, and various detection arrays.
+    `cacheStatus` is a dimension; we get cache breakdown via grouping
+    on it rather than as a sum.
     """
     q = """
     query($zoneTag: String!, $start: Time!, $end: Time!) {
@@ -207,15 +211,13 @@ def poll_http_requests(zone: dict, start: str, end: str) -> None:
             limit: 100,
             filter: {datetime_geq: $start, datetime_lt: $end}
           ) {
-            dimensions { datetime }
+            dimensions { datetime cacheStatus }
+            count
             sum {
-              requests
-              bytes
-              cachedRequests
-              cachedBytes
-              encryptedRequests
+              visits
+              edgeRequestBytes
+              edgeResponseBytes
             }
-            avg { sampleInterval }
           }
         }
       }
@@ -229,24 +231,26 @@ def poll_http_requests(zone: dict, start: str, end: str) -> None:
         dim = g.get("dimensions") or {}
         s = g.get("sum") or {}
         gelf(
-            f"HTTP {zone['name']} @ {dim.get('datetime')}: {s.get('requests')} req, {s.get('bytes')} B",
+            f"HTTP {zone['name']} @ {dim.get('datetime')} {dim.get('cacheStatus')}: {g.get('count')} req, {s.get('edgeResponseBytes')} B",
             host=f"cloudflare-{zone['name']}",
             cf_event_type="requests_5m",
             cf_zone_name=zone["name"],
             cf_bucket_datetime=dim.get("datetime"),
-            cf_requests=s.get("requests"),
-            cf_bytes=s.get("bytes"),
-            cf_cached_requests=s.get("cachedRequests"),
-            cf_cached_bytes=s.get("cachedBytes"),
-            cf_encrypted_requests=s.get("encryptedRequests"),
-            cf_sample_interval_s=(g.get("avg") or {}).get("sampleInterval"),
+            cf_cache_status=dim.get("cacheStatus"),
+            cf_requests=g.get("count"),
+            cf_visits=s.get("visits"),
+            cf_request_bytes=s.get("edgeRequestBytes"),
+            cf_response_bytes=s.get("edgeResponseBytes"),
         )
 
 
 def poll_http_by_status(zone: dict, start: str, end: str) -> None:
     """HTTP requests grouped by edge-response status — drives the
     "status code breakdown" pie + the bad-status alerting on the
-    Threats page."""
+    Threats page.
+
+    orderBy uses count_DESC (the request-count aggregator), not
+    sum_requests_DESC (which isn't a valid enum value on this schema)."""
     q = """
     query($zoneTag: String!, $start: Time!, $end: Time!) {
       viewer {
@@ -254,10 +258,10 @@ def poll_http_by_status(zone: dict, start: str, end: str) -> None:
           httpRequestsAdaptiveGroups(
             limit: 200,
             filter: {datetime_geq: $start, datetime_lt: $end},
-            orderBy: [sum_requests_DESC]
+            orderBy: [count_DESC]
           ) {
             dimensions { edgeResponseStatus clientCountryName clientRequestHTTPHost }
-            sum { requests }
+            count
           }
         }
       }
@@ -269,16 +273,15 @@ def poll_http_by_status(zone: dict, start: str, end: str) -> None:
         return
     for g in (zones[0].get("httpRequestsAdaptiveGroups") or []):
         dim = g.get("dimensions") or {}
-        s = g.get("sum") or {}
         gelf(
-            f"HTTP {zone['name']} {dim.get('edgeResponseStatus')} x{s.get('requests')} from {dim.get('clientCountryName')}",
+            f"HTTP {zone['name']} {dim.get('edgeResponseStatus')} x{g.get('count')} from {dim.get('clientCountryName')}",
             host=f"cloudflare-{zone['name']}",
             cf_event_type="requests_by_status",
             cf_zone_name=zone["name"],
             cf_status=dim.get("edgeResponseStatus"),
             cf_country=dim.get("clientCountryName"),
             cf_host=dim.get("clientRequestHTTPHost"),
-            cf_requests=s.get("requests"),
+            cf_requests=g.get("count"),
         )
 
 
@@ -314,7 +317,16 @@ def poll_firewall_events(zone: dict, start: str, end: str, state: dict) -> None:
       }
     }
     """
-    data = cf_graphql(q, {"zoneTag": zone["id"], "start": start, "end": end})
+    try:
+        data = cf_graphql(q, {"zoneTag": zone["id"], "start": start, "end": end})
+    except RuntimeError as e:
+        # CF gates firewallEventsAdaptive behind a different token
+        # permission than httpRequestsAdaptiveGroups — effectively
+        # "Account Analytics: Read" rather than just "Zone Analytics: Read".
+        # Fail soft so the rest of the cycle still emits.
+        if "not authorized" in str(e).lower() or "does not have permission" in str(e).lower():
+            return
+        raise
     zones = ((data.get("viewer") or {}).get("zones")) or []
     if not zones:
         return
@@ -360,7 +372,11 @@ def poll_firewall_events(zone: dict, start: str, end: str, state: dict) -> None:
 
 def poll_dns(zone: dict, start: str, end: str) -> None:
     """DNS query analytics. Only available if the zone is on
-    Cloudflare's DNS (i.e. you've delegated NS records). Free."""
+    Cloudflare's DNS (i.e. you've delegated NS records). Free.
+
+    Schema gotcha: like httpRequestsAdaptiveGroups, the query total is
+    the top-level `count` field, not `sum.queries` (which doesn't exist).
+    `sum` only carries `countNotCachedAndNotStale` and `countStale`."""
     q = """
     query($zoneTag: String!, $start: Time!, $end: Time!) {
       viewer {
@@ -370,7 +386,11 @@ def poll_dns(zone: dict, start: str, end: str) -> None:
             filter: {datetime_geq: $start, datetime_lt: $end}
           ) {
             dimensions { datetime queryType responseCode }
-            sum { queries }
+            count
+            sum {
+              countNotCachedAndNotStale
+              countStale
+            }
           }
         }
       }
@@ -379,7 +399,6 @@ def poll_dns(zone: dict, start: str, end: str) -> None:
     try:
         data = cf_graphql(q, {"zoneTag": zone["id"], "start": start, "end": end})
     except RuntimeError as e:
-        # Common when the zone isn't using CF DNS — fail soft
         msg = str(e)
         if "dnsAnalyticsAdaptiveGroups" in msg or "not authorized" in msg.lower():
             return
@@ -391,14 +410,124 @@ def poll_dns(zone: dict, start: str, end: str) -> None:
         dim = g.get("dimensions") or {}
         s = g.get("sum") or {}
         gelf(
-            f"DNS {zone['name']} {dim.get('queryType')} {dim.get('responseCode')} x{s.get('queries')}",
+            f"DNS {zone['name']} {dim.get('queryType')} {dim.get('responseCode')} x{g.get('count')}",
             host=f"cloudflare-{zone['name']}",
             cf_event_type="dns_summary",
             cf_zone_name=zone["name"],
             cf_bucket_datetime=dim.get("datetime"),
             cf_dns_query_type=dim.get("queryType"),
             cf_dns_response_code=dim.get("responseCode"),
-            cf_dns_queries=s.get("queries"),
+            cf_dns_queries=g.get("count"),
+            cf_dns_uncached=s.get("countNotCachedAndNotStale"),
+            cf_dns_stale=s.get("countStale"),
+        )
+
+
+# Agents to track separately on the dashboard. Each entry's flat FQDN
+# is the canonical owner; the poller groups DNS analytics by queryName
+# (which CF stores without the trailing dot, lowercased) so we get per-
+# agent + per-resolver query counts.
+#
+# The set comes from src/posts/2026-05-14-five-fake-agents-real-dns.md:
+# 5 agents × (flat SVCB + walkable _agents AliasMode + _443._tcp TLSA),
+# plus endpoint A and index._agents TXT.
+AGENT_FQDNS = [
+    # flat ServiceMode SVCB owners
+    "search.darknetian.com",
+    "bookings.darknetian.com",
+    "threat-intel.darknetian.com",
+    "dns-audit.darknetian.com",
+    "morpheus.darknetian.com",
+    # walkable AliasMode SVCB
+    "search._agents.darknetian.com",
+    "bookings._agents.darknetian.com",
+    "threat-intel._agents.darknetian.com",
+    "dns-audit._agents.darknetian.com",
+    "morpheus._agents.darknetian.com",
+    # TLSA DANE pins
+    "_443._tcp.search.darknetian.com",
+    "_443._tcp.bookings.darknetian.com",
+    "_443._tcp.threat-intel.darknetian.com",
+    "_443._tcp.dns-audit.darknetian.com",
+    "_443._tcp.morpheus.darknetian.com",
+    # org index + canonical endpoint
+    "index._agents.darknetian.com",
+    "endpoint.darknetian.com",
+]
+
+
+def _agent_name_from_qname(qname: str) -> str | None:
+    """Extract the agent name from a query name. Returns one of
+    'search', 'bookings', 'threat-intel', 'dns-audit', 'morpheus', or
+    None if the qname is index/endpoint/unrelated."""
+    q = (qname or "").lower().rstrip(".")
+    if not q.endswith(".darknetian.com"):
+        return None
+    for agent in ("search", "bookings", "threat-intel", "dns-audit", "morpheus"):
+        # Matches: <agent>.darknetian.com, <agent>._agents.darknetian.com,
+        # _443._tcp.<agent>.darknetian.com
+        if q == f"{agent}.darknetian.com" \
+           or q == f"{agent}._agents.darknetian.com" \
+           or q == f"_443._tcp.{agent}.darknetian.com":
+            return agent
+    return None
+
+
+def poll_dns_agents(zone: dict, start: str, end: str) -> None:
+    """Per-(queryName, sourceIP) DNS analytics filtered to the 17 agent
+    records on darknetian.com. Drives the 'Agents' dashboard page —
+    query volume per agent + per-resolver tables, plus cardinality of
+    resolvers as a proxy for unique-visitor count.
+
+    Caveat: sourceIP on authoritative DNS is the *recursive resolver*,
+    not the end-user. So 'unique visitor count' here is really 'unique
+    recursive resolver count' — useful as a relative signal but not
+    a literal user count. This is documented on the dashboard.
+
+    Only fires on the darknetian.com zone; bails for any other zone."""
+    if zone.get("name") != "darknetian.com":
+        return
+    q = """
+    query($zoneTag: String!, $start: Time!, $end: Time!, $names: [String!]) {
+      viewer {
+        zones(filter: {zoneTag: $zoneTag}) {
+          dnsAnalyticsAdaptiveGroups(
+            limit: 500,
+            filter: {datetime_geq: $start, datetime_lt: $end, queryName_in: $names},
+            orderBy: [count_DESC]
+          ) {
+            dimensions { queryName queryType responseCode sourceIP }
+            count
+          }
+        }
+      }
+    }
+    """
+    try:
+        data = cf_graphql(q, {"zoneTag": zone["id"], "start": start, "end": end,
+                              "names": AGENT_FQDNS})
+    except RuntimeError as e:
+        if "not authorized" in str(e).lower() or "does not have permission" in str(e).lower():
+            return
+        raise
+    zones = ((data.get("viewer") or {}).get("zones")) or []
+    if not zones:
+        return
+    for g in (zones[0].get("dnsAnalyticsAdaptiveGroups") or []):
+        dim = g.get("dimensions") or {}
+        qname = dim.get("queryName")
+        agent = _agent_name_from_qname(qname)
+        gelf(
+            f"DNS-AGENT {agent or 'other'} {qname} {dim.get('queryType')} {dim.get('responseCode')} x{g.get('count')}",
+            host=f"cloudflare-{zone['name']}",
+            cf_event_type="dns_agent",
+            cf_zone_name=zone["name"],
+            cf_dns_agent=agent,
+            cf_dns_query_name=qname,
+            cf_dns_query_type=dim.get("queryType"),
+            cf_dns_response_code=dim.get("responseCode"),
+            cf_dns_source_ip=dim.get("sourceIP"),
+            cf_dns_queries=g.get("count"),
         )
 
 
@@ -478,6 +607,7 @@ def main() -> None:
         _safe(f"{zone['name']}:http_status",  lambda z=zone: poll_http_by_status(z, start, end))
         _safe(f"{zone['name']}:firewall",     lambda z=zone: poll_firewall_events(z, start, end, state))
         _safe(f"{zone['name']}:dns",          lambda z=zone: poll_dns(z, start, end))
+        _safe(f"{zone['name']}:dns_agents",   lambda z=zone: poll_dns_agents(z, start, end))
 
     _safe("audit_logs", lambda: poll_audit_logs(start, state))
     save_state(state)

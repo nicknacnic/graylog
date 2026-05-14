@@ -121,36 +121,40 @@ def page_traffic() -> list[dict]:
         numeric("Total requests (24h)", "cf_event_type:requests_5m",
                 "sum(cf_requests)",
                 pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="req"),
-        numeric("Cached requests (24h)", "cf_event_type:requests_5m",
-                "sum(cf_cached_requests)",
-                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="req"),
-        numeric("Total bytes (24h)", "cf_event_type:requests_5m",
-                "sum(cf_bytes)",
+        numeric("Unique visits (24h)", "cf_event_type:requests_5m",
+                "sum(cf_visits)",
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="visits"),
+        numeric("Response bytes (24h)", "cf_event_type:requests_5m",
+                "sum(cf_response_bytes)",
                 pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="B"),
-        numeric("Encrypted requests (24h)", "cf_event_type:requests_5m",
-                "sum(cf_encrypted_requests)",
-                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="req"),
-        # Row 2: requests over time
+        numeric("Request bytes (24h)", "cf_event_type:requests_5m",
+                "sum(cf_request_bytes)",
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="B"),
+        # Row 2: requests over time (with cache split via cf_cache_status grouping)
         line_over_time("Requests over 24h (5-min buckets)",
                        "cf_event_type:requests_5m",
                        series=[("requests", "sum(cf_requests)"),
-                               ("cached",   "sum(cf_cached_requests)")],
+                               ("visits",   "sum(cf_visits)")],
                        pos={"col": 1, "row": 3, "width": 12, "height": 4},
                        timerange=DAY),
-        # Row 3: per-zone breakdown
+        # Row 3: per-zone breakdown + cache hit/miss
         table("Requests by zone (24h)",
               "cf_event_type:requests_5m",
               row_field="cf_zone_name",
-              series=[("requests", "sum(cf_requests)"),
-                      ("cached",   "sum(cf_cached_requests)"),
-                      ("bytes",    "sum(cf_bytes)"),
-                      ("encrypted","sum(cf_encrypted_requests)")],
+              series=[("requests",  "sum(cf_requests)"),
+                      ("visits",    "sum(cf_visits)"),
+                      ("resp bytes","sum(cf_response_bytes)"),
+                      ("req bytes", "sum(cf_request_bytes)")],
               pos={"col": 1, "row": 7, "width": 6, "height": 4}, row_limit=10),
+        pie("Cache status (24h)",
+            "cf_event_type:requests_5m",
+            field="cf_cache_status",
+            pos={"col": 7, "row": 7, "width": 3, "height": 4}),
         # Status code mix
         pie("Status codes (24h)",
             "cf_event_type:requests_by_status",
             field="cf_status",
-            pos={"col": 7, "row": 7, "width": 6, "height": 4}),
+            pos={"col": 10, "row": 7, "width": 3, "height": 4}),
         # Row 4: top countries + top hosts
         bar_categorical("Top countries by request count (24h)",
                         "cf_event_type:requests_by_status",
@@ -282,6 +286,80 @@ def page_dns_audit() -> list[dict]:
     ]
 
 
+def page_agents() -> list[dict]:
+    """Page 4: DNS query volume + unique-resolver count for the five
+    fake DNS-AID agents published on darknetian.com.
+
+    Source records (per src/posts/2026-05-14-five-fake-agents-real-dns.md):
+      search, bookings, threat-intel, dns-audit, morpheus —
+      each with flat SVCB, walkable AliasMode SVCB, and TLSA pin,
+      plus shared endpoint.darknetian.com and index._agents.
+
+    cf_dns_agent groups all variants of one agent (flat + _agents +
+    _443._tcp) into a single name. cf_dns_query_name is the literal
+    FQDN if you need to slice finer.
+
+    'Unique visitors' here is the cardinality of cf_dns_source_ip,
+    which on authoritative DNS analytics is the unique recursive
+    resolver IP — NOT the end-user IP. CF only sees the recursive
+    in the middle. Useful as a relative signal of breadth (more
+    distinct resolvers = more dispersed audience), not literal user count.
+    """
+    return [
+        # Row 1: headline numbers
+        numeric("Total agent queries (24h)",
+                "cf_event_type:dns_agent",
+                "sum(cf_dns_queries)",
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="q"),
+        numeric("Unique resolvers (24h)",
+                "cf_event_type:dns_agent",
+                "cardinality(cf_dns_source_ip)",
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="IPs"),
+        numeric("Distinct agent records (24h)",
+                "cf_event_type:dns_agent",
+                "cardinality(cf_dns_query_name)",
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="names"),
+        numeric("NXDOMAINs on agents (24h)",
+                "cf_event_type:dns_agent AND cf_dns_response_code:NXDOMAIN",
+                "sum(cf_dns_queries)",
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="q"),
+        # Row 2: per-agent breakdown table
+        table("Per-agent query volume + unique resolvers (24h)",
+              "cf_event_type:dns_agent",
+              row_field="cf_dns_agent",
+              series=[("queries",          "sum(cf_dns_queries)"),
+                      ("unique resolvers", "cardinality(cf_dns_source_ip)"),
+                      ("query types",      "cardinality(cf_dns_query_type)"),
+                      ("distinct records", "cardinality(cf_dns_query_name)")],
+              pos={"col": 1, "row": 3, "width": 12, "height": 4}, row_limit=10),
+        # Row 3: distributions
+        pie("Queries by agent (24h)",
+            "cf_event_type:dns_agent",
+            field="cf_dns_agent",
+            pos={"col": 1, "row": 7, "width": 6, "height": 4}),
+        pie("Query type mix on agents (24h)",
+            "cf_event_type:dns_agent",
+            field="cf_dns_query_type",
+            pos={"col": 7, "row": 7, "width": 6, "height": 4}),
+        # Row 4: per-record table — finer than per-agent
+        table("Per-record query volume (24h)",
+              "cf_event_type:dns_agent",
+              row_field="cf_dns_query_name",
+              series=[("queries",         "sum(cf_dns_queries)"),
+                      ("unique resolvers","cardinality(cf_dns_source_ip)"),
+                      ("agent",           "latest(cf_dns_agent)")],
+              pos={"col": 1, "row": 11, "width": 12, "height": 5}, row_limit=25),
+        # Row 5: top resolvers (recursive IPs hitting the agents)
+        table("Top recursive resolvers asking about agents (24h)",
+              "cf_event_type:dns_agent",
+              row_field="cf_dns_source_ip",
+              series=[("queries",         "sum(cf_dns_queries)"),
+                      ("distinct agents", "cardinality(cf_dns_agent)"),
+                      ("records hit",     "cardinality(cf_dns_query_name)")],
+              pos={"col": 1, "row": 16, "width": 12, "height": 5}, row_limit=25),
+    ]
+
+
 # ── build / apply ────────────────────────────────────────────────────────────
 
 def build():
@@ -290,6 +368,7 @@ def build():
         ("Traffic", page_traffic, DAY),
         ("Threats", page_threats, DAY),
         ("DNS & Audit", page_dns_audit, WEEK),
+        ("Agents", page_agents, DAY),
     ]
     pages_for_search: list[dict] = []
     pages_for_view: list[dict] = []
