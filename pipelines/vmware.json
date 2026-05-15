@@ -1,10 +1,17 @@
 {
   "pipeline": {
     "title": "ESXI",
-    "description": "VMware/vSphere extraction. Fills vmware_app from application_name when set (vCenter), else parses the leading syslog tag (ESXi hosts: Hostd, snmpd, Vpxa, vmkernel, etc.)",
+    "description": "VMware/vSphere extraction. Stage 0 drops known-noise patterns (snmpd LLDP_*). Stage 1 fills vmware_app from application_name when set (vCenter), else parses the leading syslog tag (ESXi hosts: Hostd, snmpd, Vpxa, vmkernel, etc.)",
     "stages": [
       {
         "stage": 0,
+        "match": "EITHER",
+        "rules": [
+          "drop esxi snmpd lldp noise"
+        ]
+      },
+      {
+        "stage": 1,
         "match": "EITHER",
         "rules": [
           "vmware app from application_name",
@@ -14,6 +21,11 @@
     ]
   },
   "rules": [
+    {
+      "title": "drop esxi snmpd lldp noise",
+      "description": "ESXi hosts spam ~9K snmpd LLDP_RebuildMIB / LLDP_ProcessSwitch / LLDP_ProcessPort errors per day at level 3. They're documented-harmless artifacts of the VMware snmpd not knowing how to parse the LLDP MIB. Drop at ingest so the ESXi stream isn't 80% noise.",
+      "source": "rule \"drop esxi snmpd lldp noise\"\nwhen\n  has_field(\"message\") &&\n  contains(to_string($message.message), \" snmpd\") &&\n  contains(to_string($message.message), \"LLDP_\")\nthen\n  drop_message();\nend"
+    },
     {
       "title": "vmware app from application_name",
       "description": "vCenter messages already have application_name extracted by Graylog. Copy to vmware_app for unified dashboard use.",
