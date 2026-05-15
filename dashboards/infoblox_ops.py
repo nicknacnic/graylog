@@ -35,6 +35,12 @@ UDDI_STREAM = "697c067eeeb15b769f3ce126"
 ALL_DDI_STREAMS = NIOS_STREAMS + [UDDI_STREAM]
 PRIMARY = NIOS_STREAMS[0]
 
+# Per-page streams overrides — for the GM admin / NI / Reporting pages we
+# want widgets scoped to a single member's stream, not the whole DDI fabric.
+GM_STREAM = "697e66d3eeb15b769f4235eb"
+NI_STREAM = "697c03f7eeb15b769f3cd51b"
+TR_STREAM = "697e67bdeeb15b769f423c70"
+
 TITLE = "Infoblox — Operations"
 SUMMARY = "DDI fabric — DNS top talkers, health, anomalies, DHCP"
 DESCRIPTION = (
@@ -238,6 +244,125 @@ def page_anomalies():
     ]
 
 
+def page_network_insight():
+    """Network Insight (10.10.0.55) discovery + consolidation activity.
+
+    Fields populated by the 'NIOS Grid' pipeline (see pipelines/nios_grid.json):
+      ni_module          netauto_core | netauto_discovery | sudo | scriptxmld | CRON
+      ni_summary         Wireless | Topology | Routing | Switching | Stats | Event | Subnet | Normal
+      ni_summary_status  Processed | Failed | Error
+      ni_target_ip       IP being scanned (discovery worker pulls)
+      ni_scan_op         ifTableObject | WirelessObject | InventoryObject | SystemInfo | …
+    """
+    return [
+        # Row 1: headline numerics
+        numeric("NI events (24h)", "*", "count()", timerange=DAY,
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="events"),
+        numeric("Discovery scans (24h)", "ni_module:netauto_discovery", "count()",
+                timerange=DAY, pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="scans"),
+        numeric("Devices scanned (24h)", "_exists_:ni_target_ip",
+                "cardinality(ni_target_ip)", timerange=DAY,
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="devices"),
+        numeric("Consolidations (24h)", "_exists_:ni_summary AND ni_summary_status:Processed",
+                "count()", timerange=DAY,
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="runs"),
+        # Row 2: subprocess breakdown over time
+        line_ts("NI subprocess activity (24h)", "_exists_:ni_module",
+                series=[("count", "count()")], column_field="ni_module",
+                pos={"col": 1, "row": 3, "width": 12, "height": 4}),
+        # Row 3: summary-task volume table + scan-op pie
+        table("Consolidation task throughput (24h)",
+              "_exists_:ni_summary",
+              row_field="ni_summary", row_limit=15,
+              series=[
+                  ("runs",    "count()"),
+                  ("status",  "latest(ni_summary_status)"),
+              ],
+              pos={"col": 1, "row": 7, "width": 6, "height": 5}),
+        pie("Scan-op mix (24h)", "_exists_:ni_scan_op", field="ni_scan_op",
+            pos={"col": 7, "row": 7, "width": 6, "height": 5}),
+        # Row 4: top devices being scanned
+        table("Top devices scanned by NI (24h)",
+              "_exists_:ni_target_ip",
+              row_field="ni_target_ip", row_limit=20,
+              series=[
+                  ("scans",  "count()"),
+                  ("op mix", "cardinality(ni_scan_op)"),
+                  ("first scan-op", "latest(ni_scan_op)"),
+              ],
+              pos={"col": 1, "row": 12, "width": 12, "height": 5}),
+        # Row 5: failures / errors
+        msgs("Recent NI errors / non-Processed status (24h)",
+             "_exists_:ni_summary AND NOT ni_summary_status:Processed",
+             pos={"col": 1, "row": 17, "width": 12, "height": 5}),
+    ]
+
+
+def page_grid_admin():
+    """NIOS GM admin activity (10.10.0.54) + Trinzic Reporting heartbeat.
+
+    Fields populated by 'NIOS Grid' pipeline (pipelines/nios_grid.json):
+      gm_user       admin username from the bracketed prefix
+      gm_event      Login_Allowed | Logout | …
+      gm_login_src  source IP that initiated the admin session
+
+    Reporting (tr.darknetian.com) typically just emits `-- MARK --` keepalives,
+    so its widget is a heartbeat-presence tile rather than a content cut.
+    """
+    return [
+        # Row 1: headline
+        numeric("GM events (24h)", "*", "count()", timerange=DAY,
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="events"),
+        numeric("Successful logins (24h)", "gm_event:Login_Allowed",
+                "count()", timerange=DAY,
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="logins"),
+        numeric("Logouts (24h)", "gm_event:Logout", "count()", timerange=DAY,
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="logouts"),
+        numeric("Distinct admin users (24h)", "_exists_:gm_user",
+                "cardinality(gm_user)", timerange=DAY,
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="users"),
+        # Row 2: logins over time
+        line_ts("Admin login activity over 24h", "gm_event:Login_Allowed",
+                series=[("count", "count()")], column_field="gm_user",
+                pos={"col": 1, "row": 3, "width": 12, "height": 4}),
+        # Row 3: top admin users + source IPs
+        table("Admin users (24h)",
+              "_exists_:gm_user",
+              row_field="gm_user", row_limit=15,
+              series=[
+                  ("events",  "count()"),
+                  ("logins",  "count()"),
+                  ("last src","latest(gm_login_src)"),
+                  ("last event", "latest(gm_event)"),
+              ],
+              pos={"col": 1, "row": 7, "width": 6, "height": 5}),
+        bar("Top login source IPs (24h)",
+            "gm_event:Login_Allowed AND _exists_:gm_login_src",
+            field="gm_login_src",
+            pos={"col": 7, "row": 7, "width": 6, "height": 5}, row_limit=10),
+        # Row 4: recent admin events
+        msgs("Recent GM admin events (24h)", "_exists_:gm_user",
+             pos={"col": 1, "row": 12, "width": 12, "height": 5}),
+    ]
+
+
+def page_reporting():
+    """Trinzic Reporting (10.10.0.56) — mostly `-- MARK --` syslog
+    keepalives. A presence tile + raw log tail is honest about the
+    fact that there's no rich structured data to slice."""
+    return [
+        numeric("Reporting messages (24h)", "*", "count()", timerange=DAY,
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="msgs"),
+        numeric("MARK heartbeats (24h)", "message:MARK", "count()", timerange=DAY,
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="MARK"),
+        line_ts("Reporting heartbeat over 24h", "*",
+                series=[("count", "count()")],
+                pos={"col": 1, "row": 3, "width": 12, "height": 4}),
+        msgs("All Reporting messages (24h)", "*",
+             pos={"col": 1, "row": 7, "width": 12, "height": 6}),
+    ]
+
+
 def page_dhcp_ops():
     return [
         # Row 1: sender (which NIOS appliances are talking)
@@ -284,9 +409,13 @@ def page_dhcp_ops():
 
 # ── build / apply: multi-stream ──────────────────────────────────────────────
 
-def build_pages_multi(specs, default_timerange_s):
-    """Like gl.build_widgets_for_page but the search-type queries across all
-    DDI streams instead of just one."""
+def build_pages_multi(specs, default_timerange_s, streams=None):
+    """Like gl.build_widgets_for_page but the search-type queries can scope
+    to an arbitrary stream-set per page (defaults to all DDI streams).
+    Pass `streams=[GM_STREAM]` for a single-member page, etc."""
+    if streams is None:
+        streams = ALL_DDI_STREAMS
+    primary = streams[0]
     search_types, widgets, positions, titles, widget_mapping = [], [], {}, {}, {}
     for s in specs:
         wid, stid = gl.gen_id(), gl.gen_id()
@@ -295,7 +424,7 @@ def build_pages_multi(specs, default_timerange_s):
         if s["kind"] == "agg":
             ps = gl.align_pivot_ids(s.get("series", []), s.get("pivot_series", []))
             st = gl.pivot(
-                search_type_id=stid, stream_id=PRIMARY,
+                search_type_id=stid, stream_id=primary,
                 query=query, timerange_s=timerange,
                 row_field=s.get("row_field"),
                 column_field=s.get("column_field"),
@@ -303,10 +432,10 @@ def build_pages_multi(specs, default_timerange_s):
                 row_limit=s.get("row_limit", 25),
                 column_limit=s.get("column_limit", 25),
             )
-            st["streams"] = ALL_DDI_STREAMS
+            st["streams"] = streams
             search_types.append(st)
             w = gl.widget_aggregation(
-                widget_id=wid, stream_id=PRIMARY,
+                widget_id=wid, stream_id=primary,
                 query=query, timerange_s=timerange,
                 row_field=s.get("row_field"),
                 column_field=s.get("column_field"),
@@ -315,20 +444,20 @@ def build_pages_multi(specs, default_timerange_s):
                 row_limit=s.get("row_limit", 25),
                 column_limit=s.get("column_limit", 25),
             )
-            w["streams"] = ALL_DDI_STREAMS
+            w["streams"] = streams
             widgets.append(w)
         elif s["kind"] == "messages":
             st = gl.messages_searchtype(
-                search_type_id=stid, stream_id=PRIMARY,
+                search_type_id=stid, stream_id=primary,
                 query=query, timerange_s=timerange,
             )
-            st["streams"] = ALL_DDI_STREAMS
+            st["streams"] = streams
             search_types.append(st)
             w = gl.widget_messages(
-                widget_id=wid, stream_id=PRIMARY,
+                widget_id=wid, stream_id=primary,
                 query=query, timerange_s=timerange,
             )
-            w["streams"] = ALL_DDI_STREAMS
+            w["streams"] = streams
             widgets.append(w)
         else:
             raise ValueError(f"unknown widget kind: {s['kind']}")
@@ -339,16 +468,20 @@ def build_pages_multi(specs, default_timerange_s):
 
 
 def build():
+    # page_defs: (title, build_fn, default_timerange, streams_override)
     page_defs = [
-        ("Top talkers",    page_top_talkers, DAY),
-        ("DNS health",     page_health,      DAY),
-        ("Anomalies",      page_anomalies,   DAY),
-        ("DHCP & ops",     page_dhcp_ops,    DAY),
+        ("Top talkers",     page_top_talkers,    DAY, None),
+        ("DNS health",      page_health,         DAY, None),
+        ("Anomalies",       page_anomalies,      DAY, None),
+        ("DHCP & ops",      page_dhcp_ops,       DAY, None),
+        ("Network Insight", page_network_insight, DAY, [NI_STREAM]),
+        ("Grid Admin",      page_grid_admin,     DAY, [GM_STREAM]),
+        ("Reporting",       page_reporting,      DAY, [TR_STREAM]),
     ]
     pages_for_search, pages_for_view = [], []
-    for title, fn, tr in page_defs:
+    for title, fn, tr, streams in page_defs:
         qid = gl.gen_id()
-        sts, ws, pos, ti, wm = build_pages_multi(fn(), tr)
+        sts, ws, pos, ti, wm = build_pages_multi(fn(), tr, streams=streams)
         pages_for_search.append({"query_id": qid, "search_types": sts, "timerange_s": tr})
         pages_for_view.append({
             "query_id": qid, "title": title,
