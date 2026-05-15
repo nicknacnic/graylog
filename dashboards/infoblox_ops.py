@@ -41,6 +41,12 @@ GM_STREAM = "697e66d3eeb15b769f4235eb"
 NI_STREAM = "697c03f7eeb15b769f3cd51b"
 TR_STREAM = "697e67bdeeb15b769f423c70"
 
+# Service-scoped streams created by indexing/nios_split.py — route the
+# same underlying NIOS member syslog by `named[…]` vs `dhcpd[…]` so the
+# Auth-DNS / DHCP dashboard pages stop mixing the two.
+NIOS_DNS_AUTH_STREAM = "6a07586aa72ecf3a3bf3096b"
+NIOS_DHCP_STREAM     = "6a07586ba72ecf3a3bf3097c"
+
 TITLE = "Infoblox — Operations"
 SUMMARY = "DDI fabric — DNS top talkers, health, anomalies, DHCP"
 DESCRIPTION = (
@@ -363,9 +369,165 @@ def page_reporting():
     ]
 
 
-def page_dhcp_ops():
+def page_auth_dns():
+    """Auth/forwarding DNS only — BIND `named[…]` from the NIOS members
+    that serve auth + forward to NIOS-X. Scoped to the 'NIOS DNS (auth)'
+    stream so DHCP failover chatter and admin events don't contaminate
+    the query-rate widgets.
+
+    The existing NIOS pipelines (attached to the per-host streams) set
+    dns_event_type / qname / qtype / rcode / client_ip on the same
+    messages, so the fields are available here too — Graylog applies
+    pipeline rules per stream membership, and these messages live in
+    both the per-host AND the service-scoped stream."""
     return [
-        # Row 1: sender (which NIOS appliances are talking)
+        # Row 1: headline numerics
+        numeric("Auth-DNS messages (24h)", "*", "count()", timerange=DAY,
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="msgs"),
+        numeric("Queries (24h)", "dns_event_type:query", "count()", timerange=DAY,
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="q"),
+        numeric("Responses (24h)", "dns_event_type:response", "count()", timerange=DAY,
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="r"),
+        numeric("NXDOMAIN (24h)",
+                "dns_is_nxdomain:true OR rcode:NXDOMAIN",
+                "count()", timerange=DAY,
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="nx"),
+        # Row 2: per-server rate (.57 vs .253)
+        line_ts("Auth-DNS rate by server (24h)",
+                "*", series=[("count", "count()")],
+                column_field="source",
+                pos={"col": 1, "row": 3, "width": 12, "height": 4}),
+        # Row 3: top auth clients + top qnames
+        table("Top auth-DNS clients (24h)",
+              "_exists_:client_ip",
+              row_field="client_ip", row_limit=15,
+              series=[
+                  ("queries",  "count()"),
+                  ("name",     "latest(client_fqdn)"),
+                  ("hostname", "latest(client_hostname)"),
+                  ("qnames",   "cardinality(qname)"),
+              ],
+              pos={"col": 1, "row": 7, "width": 6, "height": 5}),
+        table("Top auth-DNS qnames (24h)",
+              "_exists_:qname AND NOT qname:\"\"",
+              row_field="qname", row_limit=15,
+              series=[
+                  ("queries", "count()"),
+                  ("clients", "cardinality(client_ip)"),
+              ],
+              pos={"col": 7, "row": 7, "width": 6, "height": 5}),
+        # Row 4: rcode mix + qtype mix
+        pie("RCODE mix (24h)", "_exists_:rcode", field="rcode",
+            pos={"col": 1, "row": 12, "width": 6, "height": 4}),
+        pie("Query type mix (24h)", "_exists_:qtype", field="qtype",
+            pos={"col": 7, "row": 12, "width": 6, "height": 4}),
+    ]
+
+
+def page_recursive_dns():
+    """NIOS-X recursive DNS — UDDI CEF stream only. Each message is one
+    recursive resolution NIOS-X performed on behalf of a NIOS-auth
+    server (or, more often these days, a direct client of NIOS-X).
+    Fields populated by the UDDI pipeline (pipelines/uddi.json)."""
+    return [
+        # Row 1: headline numerics
+        numeric("Recursive answers (24h)",
+                "event_class_id:\"DNS Response\"", "count()", timerange=DAY,
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="r"),
+        numeric("Distinct clients (24h)",
+                "_exists_:client_ip", "cardinality(client_ip)", timerange=DAY,
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="clients"),
+        numeric("Distinct qnames (24h)",
+                "_exists_:qname", "cardinality(qname)", timerange=DAY,
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="qnames"),
+        numeric("NXDOMAIN (24h)",
+                "dns_is_nxdomain:true OR rcode:NXDOMAIN OR InfobloxDNSRCode:NXDOMAIN",
+                "count()", timerange=DAY,
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="nx"),
+        # Row 2: response rate over 24h
+        line_ts("Recursive answer rate over 24h",
+                "event_class_id:\"DNS Response\"",
+                series=[("count", "count()")],
+                pos={"col": 1, "row": 3, "width": 12, "height": 4}),
+        # Row 3: top clients (mostly NIOS-auth forwarders) + top qnames
+        table("Top recursive clients (24h)",
+              "_exists_:client_ip",
+              row_field="client_ip", row_limit=15,
+              series=[
+                  ("responses", "count()"),
+                  ("name",      "latest(client_fqdn)"),
+                  ("hostname",  "latest(client_hostname)"),
+                  ("qnames",    "cardinality(qname)"),
+              ],
+              pos={"col": 1, "row": 7, "width": 6, "height": 5}),
+        table("Top recursive qnames (24h)",
+              "_exists_:qname",
+              row_field="qname", row_limit=15,
+              series=[
+                  ("hits",    "count()"),
+                  ("clients", "cardinality(client_ip)"),
+              ],
+              pos={"col": 7, "row": 7, "width": 6, "height": 5}),
+        # Row 4: rcode + qtype mix
+        pie("Recursive RCODE mix (24h)",
+            "_exists_:rcode OR _exists_:InfobloxDNSRCode",
+            field="rcode",
+            pos={"col": 1, "row": 12, "width": 6, "height": 4}),
+        pie("Recursive query type mix (24h)",
+            "_exists_:qtype OR _exists_:InfobloxDNSQType",
+            field="qtype",
+            pos={"col": 7, "row": 12, "width": 6, "height": 4}),
+    ]
+
+
+def page_dhcp():
+    """ISC dhcpd events — failover peer chatter, lease grants/expires,
+    scope warnings — from the 'NIOS DHCP' stream. The messages aren't
+    structured-extracted yet; widgets work on substring/regex queries
+    against the raw message body. Add a dhcp pipeline rule later if
+    cardinality/mac-level cuts become useful."""
+    return [
+        # Row 1: headline event-type counters
+        numeric("DHCP events (24h)", "*", "count()", timerange=DAY,
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="ev"),
+        numeric("Failover messages (24h)", "message:\"failover peer\"",
+                "count()", timerange=DAY,
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="fo"),
+        numeric("Leases added (24h)", "message:\"leases added\"",
+                "count()", timerange=DAY,
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="add"),
+        numeric("DHCP errors / warnings (24h)",
+                "message:fail OR message:error OR message:warn OR message:reject",
+                "count()", timerange=DAY,
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="err"),
+        # Row 2: rate over 24h
+        line_ts("DHCP message rate over 24h", "*",
+                series=[("count", "count()")],
+                column_field="source",
+                pos={"col": 1, "row": 3, "width": 12, "height": 4}),
+        # Row 3: per-NIOS DHCP server table + failover-peer breakdown
+        table("DHCP server breakdown (24h)",
+              "*",
+              row_field="source", row_limit=10,
+              series=[
+                  ("events",     "count()"),
+                  ("failover",   "count()"),
+              ],
+              pos={"col": 1, "row": 7, "width": 6, "height": 5}),
+        bar("Failover peer names (24h)",
+            "message:\"failover peer\"",
+            field="application_name",
+            pos={"col": 7, "row": 7, "width": 6, "height": 5}, row_limit=10),
+        # Row 4: raw messages for forensics
+        msgs("Recent DHCP events (24h)", "*",
+             pos={"col": 1, "row": 12, "width": 12, "height": 6}),
+    ]
+
+
+def page_dhcp_ops_legacy():
+    """Legacy page — kept for reference but no longer wired into build().
+    The new page_dhcp() scoped to NIOS DHCP stream supersedes this."""
+    return [
         numeric("Total DDI messages (24h)", "*", "count()", timerange=DAY,
                 pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="msgs"),
         numeric("Distinct NIOS sources (24h)",
@@ -378,13 +540,11 @@ def page_dhcp_ops():
                 "dns_client_port:67 OR dns_client_port:68",
                 "count()", timerange=DAY,
                 pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="dhcp"),
-        # Row 2: per-NIOS rate
         line_ts("Per-appliance message rate (24h)",
                 "*",
                 series=[("count", "count()")],
                 column_field="source",
                 pos={"col": 1, "row": 3, "width": 12, "height": 4}),
-        # Row 3: source table — health/heartbeat for each NIOS member
         table("NIOS / UDDI appliances seen (24h)",
               "*",
               row_field="source", row_limit=20,
@@ -395,7 +555,6 @@ def page_dhcp_ops():
                   ("fqdn",     "latest(sender_fqdn)"),
               ],
               pos={"col": 1, "row": 7, "width": 12, "height": 5}),
-        # Row 4: UDDI vs NIOS qtype mix
         bar("UDDI-only qtype mix (24h)",
             "_exists_:deviceAddress AND _exists_:qtype",
             field="qtype",
@@ -473,7 +632,9 @@ def build():
         ("Top talkers",     page_top_talkers,    DAY, None),
         ("DNS health",      page_health,         DAY, None),
         ("Anomalies",       page_anomalies,      DAY, None),
-        ("DHCP & ops",      page_dhcp_ops,       DAY, None),
+        ("Auth DNS",        page_auth_dns,       DAY, [NIOS_DNS_AUTH_STREAM]),
+        ("Recursive DNS",   page_recursive_dns,  DAY, [UDDI_STREAM]),
+        ("DHCP",            page_dhcp,           DAY, [NIOS_DHCP_STREAM]),
         ("Network Insight", page_network_insight, DAY, [NI_STREAM]),
         ("Grid Admin",      page_grid_admin,     DAY, [GM_STREAM]),
         ("Reporting",       page_reporting,      DAY, [TR_STREAM]),

@@ -60,6 +60,8 @@ STEPS = [
          ["python3", "indexing/uddi.py"]),
     step("indexing", "Infoblox NIOS index set + repoint all 5 NIOS streams",
          ["python3", "indexing/nios.py"]),
+    step("indexing", "Split NIOS per-host streams by service (NIOS DNS auth + NIOS DHCP)",
+         ["python3", "indexing/nios_split.py"]),
     step("indexing", "Aruba index set + native AP syslog stream",
          ["python3", "indexing/aruba.py"]),
     step("indexing", "NAS stream (default index — syslog from 10.10.0.50)",
