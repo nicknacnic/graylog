@@ -1,0 +1,23 @@
+[Unit]
+Description=Infoblox CSP CubeJS → Graylog (IQ metrics)
+After=network-online.target graylog-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=csp-poller
+Group=csp-poller
+EnvironmentFile=/etc/csp-poller/env
+ExecStart=/usr/bin/python3 /opt/csp-poller/csp_poller.py
+ReadWritePaths=/var/lib/csp-poller
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true

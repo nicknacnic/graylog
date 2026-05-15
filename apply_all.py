@@ -68,6 +68,8 @@ STEPS = [
          ["python3", "indexing/nas.py"]),
     step("indexing", "Cloudflare index set + stream",
          ["python3", "indexing/cloudflare.py"]),
+    step("indexing", "Infoblox CSP (CubeJS / IQ metrics) index set + stream",
+         ["python3", "indexing/csp.py"]),
 
     # ── 2. Inputs ──────────────────────────────────────────────────────────
     step("inputs", "GELF HTTP input on 127.0.0.1:12202 (for iLO poller)",

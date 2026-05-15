@@ -50,6 +50,11 @@ TR_STREAM = "697e67bdeeb15b769f423c70"
 NIOS_DNS_STREAM  = "6a07586aa72ecf3a3bf3096b"
 NIOS_DHCP_STREAM = "6a07586ba72ecf3a3bf3097c"
 
+# Infoblox CSP (CubeJS / IQ-computed metrics). Filled lazily at build()
+# time via lookup-by-title so this constant doesn't need to be edited
+# after the indexing/csp.py step has created the stream.
+CSP_STREAM_TITLE = "Infoblox CSP"
+
 TITLE = "Infoblox — Operations"
 SUMMARY = "DDI fabric — DNS top talkers, health, anomalies, DHCP"
 DESCRIPTION = (
@@ -565,6 +570,81 @@ def page_dhcp():
     ]
 
 
+def page_infoblox_iq():
+    """Infoblox IQ — authoritative health metrics from CSP CubeJS.
+
+    Unlike the log-derived pages above, this page reads numbers Infoblox
+    IQ already computed: cache_hit_ratio, DNS QPS, NX/SERVFAIL/REFUSED %,
+    upstream resolution latency, plus the LAYER8-NIOSX host's CPU and
+    memory. Polled every 5 min by pollers/csp_poller.py against
+    /api/cubejs/v1/query — endpoint documented in
+    _infoblox/reef/docs/internal/INTERNAL-ENDPOINTS.md.
+
+    Fields (set by csp_poller.py):
+      csp_metric         e.g. cache_hit_ratio_iq, dns_qps_iq, …
+      csp_scope          'account' (host=='') or 'host'
+      csp_value          numeric measurement
+      csp_host_uuid      host UUID when scope=='host'
+      csp_host_label     friendly name (default 'NIOS-X')
+      csp_bucket         ISO timestamp of the cube bucket
+    """
+    def metric_tile(title, metric, *, pos, name="val", scope=None):
+        q = f"csp_metric:{metric}"
+        if scope:
+            q += f" AND csp_scope:{scope}"
+        return numeric(title, q, "latest(csp_value)",
+                       timerange=HOUR, pos=pos, name=name)
+
+    return [
+        # Row 1: account-level DNS quality headlines
+        metric_tile("Cache hit ratio (%)", "cache_hit_ratio_iq",
+                    pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="%"),
+        metric_tile("DNS QPS", "dns_qps_iq",
+                    pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="qps"),
+        metric_tile("NXDOMAIN (%)", "dns_nxdomain_percent_iq",
+                    pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="%"),
+        metric_tile("Upstream latency (ms)", "dns_latency_upstream_iq",
+                    pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="ms"),
+        # Row 2: rcode breakdown numerics
+        metric_tile("SERVFAIL (%)", "dns_servfail_percent_iq",
+                    pos={"col": 1, "row": 3, "width": 3, "height": 2}, name="%"),
+        metric_tile("REFUSED (%)", "dns_refused_percent_iq",
+                    pos={"col": 4, "row": 3, "width": 3, "height": 2}, name="%"),
+        metric_tile("Other rcodes (%)", "dns_others_percent_iq",
+                    pos={"col": 7, "row": 3, "width": 3, "height": 2}, name="%"),
+        metric_tile("DDNS updates/sec", "ddns_ups_iq",
+                    pos={"col": 10, "row": 3, "width": 3, "height": 2}, name="ups"),
+        # Row 3: trend — cache hit + QPS over 24h
+        line_ts("Cache hit ratio over 24h",
+                "csp_metric:cache_hit_ratio_iq",
+                series=[("cache hit %", "avg(csp_value)")],
+                pos={"col": 1, "row": 5, "width": 6, "height": 4}),
+        line_ts("DNS QPS over 24h",
+                "csp_metric:dns_qps_iq",
+                series=[("qps", "avg(csp_value)")],
+                pos={"col": 7, "row": 5, "width": 6, "height": 4}),
+        # Row 4: rcode trends overlaid
+        line_ts("rcode percent trends over 24h",
+                "csp_metric:dns_nxdomain_percent_iq OR csp_metric:dns_servfail_percent_iq OR csp_metric:dns_refused_percent_iq",
+                series=[("percent", "avg(csp_value)")],
+                column_field="csp_metric",
+                pos={"col": 1, "row": 9, "width": 12, "height": 4}),
+        # Row 5: LAYER8-NIOSX host CPU + memory
+        metric_tile("LAYER8-NIOSX CPU (%)", "host_cpu_iq",
+                    pos={"col": 1, "row": 13, "width": 3, "height": 2},
+                    name="%", scope="host"),
+        metric_tile("LAYER8-NIOSX memory (%)", "host_memory_iq",
+                    pos={"col": 4, "row": 13, "width": 3, "height": 2},
+                    name="%", scope="host"),
+        # Row 5 cont: host trend
+        line_ts("LAYER8-NIOSX CPU + memory over 24h",
+                "csp_scope:host AND (csp_metric:host_cpu_iq OR csp_metric:host_memory_iq)",
+                series=[("percent", "avg(csp_value)")],
+                column_field="csp_metric",
+                pos={"col": 7, "row": 13, "width": 6, "height": 4}),
+    ]
+
+
 def page_dhcp_ops_legacy():
     """Legacy page — kept for reference but no longer wired into build().
     The new page_dhcp() scoped to NIOS DHCP stream supersedes this."""
@@ -667,7 +747,20 @@ def build_pages_multi(specs, default_timerange_s, streams=None):
     return search_types, widgets, positions, titles, widget_mapping
 
 
+def _resolve_stream_id(title: str) -> str | None:
+    """Lookup a stream by title at build time. Returns None if missing;
+    caller decides whether to skip the page or fail loudly."""
+    streams = gl.api("GET", "streams") or {}
+    for s in streams.get("streams", []):
+        if s.get("title") == title:
+            return s["id"]
+    return None
+
+
 def build():
+    csp_stream_id = _resolve_stream_id(CSP_STREAM_TITLE)
+    csp_streams = [csp_stream_id] if csp_stream_id else None
+
     # page_defs: (title, build_fn, default_timerange, streams_override)
     page_defs = [
         ("Top talkers",     page_top_talkers,    DAY, None),
@@ -680,6 +773,10 @@ def build():
         ("Grid Admin",      page_grid_admin,     DAY, [GM_STREAM]),
         ("Reporting",       page_reporting,      DAY, [TR_STREAM]),
     ]
+    if csp_streams:
+        page_defs.append(("Infoblox IQ", page_infoblox_iq, DAY, csp_streams))
+    else:
+        print("  (Infoblox CSP stream not found — run indexing/csp.py first to add the IQ page)")
     pages_for_search, pages_for_view = [], []
     for title, fn, tr, streams in page_defs:
         qid = gl.gen_id()

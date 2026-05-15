@@ -105,6 +105,44 @@ EOF
 
 install_cf_poller
 
+# CSP CubeJS / Infoblox IQ poller — single-unit shape like cf-poller.
+install_csp_poller() {
+  local user=csp-poller
+  local src=pollers/csp_poller.py
+
+  if [[ ! -f "$src" ]]; then
+    echo "skip csp-poller (no $src in repo)"
+    return
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -o root -g root -m 0755 /opt/csp-poller
+  install -m 0755 "$src" /opt/csp-poller/
+  install -d -o "$user" -g "$user" -m 0750 /var/lib/csp-poller
+  install -d -o root -g "$user" -m 0750 /etc/csp-poller
+  if [[ ! -f /etc/csp-poller/env ]]; then
+    cat > /etc/csp-poller/env <<'EOF'
+# Infoblox CSP read-scope API token (csp.infoblox.com).
+# Get from https://csp.infoblox.com -> User Profile -> User API Keys.
+INFOBLOX_API_KEY=
+# Optional per-host scope. Empty = skip per-host metrics.
+# For LAYER8-NIOSX the UUID is 0b788e8f925d96fdc8d0001de05800a1
+CSP_HOST_UUID=
+CSP_HOST_LABEL=NIOS-X
+CSP_LOOKBACK_MIN=60
+GELF_URL=http://127.0.0.1:12202/gelf
+EOF
+    chmod 0640 /etc/csp-poller/env
+    chown root:"$user" /etc/csp-poller/env
+    echo "NOTE: edit /etc/csp-poller/env to add INFOBLOX_API_KEY (and optionally CSP_HOST_UUID)"
+  fi
+  install -m 0644 systemd/csp-poller.service /etc/systemd/system/
+  install -m 0644 systemd/csp-poller.timer   /etc/systemd/system/
+}
+
+install_csp_poller
+
 # Auto-rotate watchdog: watches Graylog's indexer-failures count and
 # rotates the offending index set when it spikes. Same single-unit
 # shape as cf-poller.
@@ -151,6 +189,7 @@ systemctl enable --now \
   ilo-poller-health.timer ilo-poller-logs.timer \
   idrac-poller-health.timer idrac-poller-logs.timer \
   cf-poller.timer \
+  csp-poller.timer \
   graylog-auto-rotate.timer
 
 echo "installed. Status:"
@@ -158,4 +197,5 @@ systemctl --no-pager status \
   ilo-poller-health.timer ilo-poller-logs.timer \
   idrac-poller-health.timer idrac-poller-logs.timer \
   cf-poller.timer \
+  csp-poller.timer \
   graylog-auto-rotate.timer || true
