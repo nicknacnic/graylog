@@ -1,0 +1,22 @@
+{
+  "pipeline": {
+    "title": "UDDI (cdc.darknetian.com)",
+    "description": "Normalize UDDI CEF events into the same dns_* / rcode / qname / qtype / dns_is_* shape the NIOS pipelines emit, so the Infoblox dashboard's pages (DNS / NXDOMAINs / SERVFAILs / Ops) work across both NIOS and UDDI sources.",
+    "stages": [
+      {
+        "stage": 0,
+        "match": "EITHER",
+        "rules": [
+          "uddi_normalize_dns_fields"
+        ]
+      }
+    ]
+  },
+  "rules": [
+    {
+      "title": "uddi_normalize_dns_fields",
+      "description": "UDDI CEF → normalized DNS fields. The Graylog CEF input plugin already parses the Infoblox CEF key=value pairs into top-level GELF fields (InfobloxDNSRCode, destinationDnsDomain, InfobloxDNSQType, deviceAddress, etc.). This rule just aliases them to the dashboard's expected field names and computes the dns_is_* booleans, matching the shape the NIOS pipelines produce.",
+      "source": "rule \"uddi_normalize_dns_fields\"\nwhen\n  has_field(\"event_class_id\") && has_field(\"InfobloxDNSRCode\")\nthen\n  let rc = to_string($message.InfobloxDNSRCode);\n  set_field(\"dns_event_type\", \"response\");\n  set_field(\"rcode\", rc);\n  set_field(\"qname\", to_string($message.destinationDnsDomain));\n  set_field(\"qtype\", to_string($message.InfobloxDNSQType));\n  set_field(\"dns_is_nxdomain\", rc == \"NXDOMAIN\");\n  set_field(\"dns_is_servfail\", rc == \"SERVFAIL\");\n  set_field(\"dns_is_error\",    rc != \"NOERROR\" && rc != \"\");\nend"
+    }
+  ]
+}

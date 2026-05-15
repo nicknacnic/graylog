@@ -80,6 +80,8 @@ STEPS = [
     # ── 4. Pipelines + rules ───────────────────────────────────────────────
     step("pipelines", "Cradlepoint extraction rules + pipeline",
          ["python3", "pipelines/apply.py", "pipelines/cradlepoint.json"]),
+    step("pipelines", "UDDI CEF normalize rule + pipeline (restores dns_event_type/rcode/qname/dns_is_nxdomain on UDDI)",
+         ["python3", "pipelines/apply.py", "pipelines/uddi.json"]),
     step("pipelines", "Aruba extraction rules + pipeline",
          ["python3", "pipelines/apply.py", "pipelines/aruba.json"]),
     step("pipelines", "VMware vmware_app extraction rules + ESXI pipeline",
