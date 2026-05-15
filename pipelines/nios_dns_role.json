@@ -1,0 +1,28 @@
+{
+  "pipeline": {
+    "title": "NIOS DNS Role (auth vs forward)",
+    "description": "Classify each BIND `named[…]` log line as auth or forward based on whether its qname is inside the local auth zone (darknetian.com). NIOS .57 and .253 serve auth for darknetian.com and forward everything else to NIOS-X; named[…] logs both kinds identically, so this rule attaches a nios_dns_role field that the dashboard can slice on. Stage is 1 (not 0) so it runs AFTER the per-host pipelines have extracted qname in their stage 0 — Graylog runs same-numbered stages across pipelines in parallel and ordered stages sequentially. Attach to streams: NIOS DNS (member), and the per-host NIOS (ddi) / NIOS (ns1) so the field is also queryable from existing dashboards.",
+    "stages": [
+      {
+        "stage": 1,
+        "match": "EITHER",
+        "rules": [
+          "nios mark dns auth",
+          "nios mark dns forward"
+        ]
+      }
+    ]
+  },
+  "rules": [
+    {
+      "title": "nios mark dns auth",
+      "description": "Tag the message as nios_dns_role=auth when qname is the local zone (darknetian.com) or a subdomain of it. Tolerates trailing dot in BIND's normalized qname form.",
+      "source": "rule \"nios mark dns auth\"\nwhen\n  has_field(\"qname\") && (\n    lowercase(to_string($message.qname)) == \"darknetian.com\" ||\n    lowercase(to_string($message.qname)) == \"darknetian.com.\" ||\n    ends_with(lowercase(to_string($message.qname)), \".darknetian.com\", true) ||\n    ends_with(lowercase(to_string($message.qname)), \".darknetian.com.\", true)\n  )\nthen\n  set_field(\"nios_dns_role\", \"auth\");\nend"
+    },
+    {
+      "title": "nios mark dns forward",
+      "description": "Everything else with a qname extracted on a NIOS DNS stream is a forwarded query (NIOS sent it onwards to NIOS-X). Mutually exclusive with the auth rule.",
+      "source": "rule \"nios mark dns forward\"\nwhen\n  has_field(\"qname\") && !(\n    lowercase(to_string($message.qname)) == \"darknetian.com\" ||\n    lowercase(to_string($message.qname)) == \"darknetian.com.\" ||\n    ends_with(lowercase(to_string($message.qname)), \".darknetian.com\", true) ||\n    ends_with(lowercase(to_string($message.qname)), \".darknetian.com.\", true)\n  )\nthen\n  set_field(\"nios_dns_role\", \"forward\");\nend"
+    }
+  ]
+}

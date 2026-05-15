@@ -86,6 +86,8 @@ STEPS = [
          ["python3", "pipelines/apply.py", "pipelines/uddi.json"]),
     step("pipelines", "NIOS Grid (GM admin event + NI module/summary extraction)",
          ["python3", "pipelines/apply.py", "pipelines/nios_grid.json"]),
+    step("pipelines", "NIOS DNS Role (auth vs forward tagging on darknetian.com)",
+         ["python3", "pipelines/apply.py", "pipelines/nios_dns_role.json"]),
     step("pipelines", "Aruba extraction rules + pipeline",
          ["python3", "pipelines/apply.py", "pipelines/aruba.json"]),
     step("pipelines", "VMware vmware_app extraction rules + ESXI pipeline",
