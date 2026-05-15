@@ -446,54 +446,52 @@ def page_auth_dns():
 
 
 def page_recursive_dns():
-    """Recursive DNS: NIOS forwards out + NIOS-X CEF responses back.
+    """Recursive DNS: NIOS-X is the actual recursive resolver. Two
+    paths feed it — NIOS member forwarders (.57, .253) when an internal
+    client asks NIOS for a non-auth zone, AND direct queries from
+    endpoints that have NIOS-X configured as their resolver (DHCP
+    option 6 distributes it). So the total recursive volume on NIOS-X
+    is typically larger than the NIOS forwarding volume.
 
-    Spans two streams:
-      * NIOS DNS (member syslog) — events where nios_dns_role=forward
-        capture each query NIOS sent onwards to NIOS-X
-      * UDDI                     — each NIOS-X CEF 'DNS Response' is the
-        recursive answer that came back
-
-    The two should track each other closely over time. Divergence means
-    NIOS-X is dropping queries, caching aggressively, or the CEF
-    forwarder is degraded.
-
-    Fields populated by pipelines/uddi.json (UDDI) and pipelines/
-    nios_dns_role.json (NIOS forward tag) plus the existing per-host
-    NIOS extraction pipeline."""
+    Spans two streams (NIOS DNS member + UDDI). Field semantics:
+      * On UDDI events: client_ip is the actual querier (NIOS member
+        if forwarded, end-host if direct). event_class_id='DNS Response'
+        is the canonical 'one recursive answer' marker.
+      * On NIOS DNS member events with nios_dns_role=forward, the
+        NIOS member is the one logging the forward; client_ip is the
+        end-host that asked NIOS in the first place."""
     FWD = "nios_dns_role:forward"
     REC = 'event_class_id:"DNS Response"'
+    REC_VIA_NIOS   = f'{REC} AND (client_ip:"10.10.0.57" OR client_ip:"10.10.0.253")'
+    REC_FROM_DIRECT = f'{REC} AND NOT (client_ip:"10.10.0.57" OR client_ip:"10.10.0.253")'
     return [
-        # Row 1: headline — forward (NIOS-side) vs recursive (NIOS-X-side)
-        numeric("Forwarded by NIOS (24h)", FWD, "count()", timerange=DAY,
-                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="fwd"),
-        numeric("Recursive answers (24h)", REC, "count()", timerange=DAY,
-                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="rec"),
-        numeric("Recursive NXDOMAIN (24h)",
-                f"{REC} AND (dns_is_nxdomain:true OR rcode:NXDOMAIN OR InfobloxDNSRCode:NXDOMAIN)",
-                "count()", timerange=DAY,
-                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="nx"),
-        numeric("Distinct recursive qnames (24h)",
-                f"{REC} AND _exists_:qname",
-                "cardinality(qname)", timerange=DAY,
-                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="qnames"),
-        # Row 2: side-by-side trend (forward vs recursive)
-        line_ts("Forward (NIOS) vs recursive (NIOS-X) rate, 24h",
-                f"{FWD} OR {REC}",
-                series=[("count", "count()")],
-                column_field="dns_event_type",
+        # Row 1: NIOS-X total, broken down by source path
+        numeric("NIOS-X recursive — all (24h)", REC, "count()", timerange=DAY,
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="all"),
+        numeric("Via NIOS forwarder (24h)", REC_VIA_NIOS, "count()", timerange=DAY,
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="via NIOS"),
+        numeric("Direct to NIOS-X (24h)", REC_FROM_DIRECT, "count()", timerange=DAY,
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="direct"),
+        numeric("NIOS forwards out (24h)", FWD, "count()", timerange=DAY,
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="fwd-out"),
+        # Row 2: rate over 24h, grouped by client_ip so you see who's
+        # driving NIOS-X demand (NIOS forwarders vs direct endpoints)
+        line_ts("NIOS-X recursive rate by client (24h)",
+                REC, series=[("count", "count()")],
+                column_field="client_ip",
                 pos={"col": 1, "row": 3, "width": 12, "height": 4}),
-        # Row 3: NIOS-side — what's being forwarded (the actual demand)
-        table("Top forwarded qnames (24h, NIOS-side)",
+        # Row 3: NIOS-side — what NIOS is forwarding (its demand profile)
+        table("Top forwarded qnames (24h, NIOS members forwarding to NIOS-X)",
               f"{FWD} AND _exists_:qname AND NOT qname:\"\"",
               row_field="qname", row_limit=20,
               series=[
-                  ("forwards", "count()"),
-                  ("clients",  "cardinality(client_ip)"),
+                  ("forwards",      "count()"),
+                  ("client (NIOS)", "latest(source)"),
+                  ("via clients",   "cardinality(client_ip)"),
               ],
               pos={"col": 1, "row": 7, "width": 12, "height": 5}),
-        # Row 4: NIOS-X-side — what the recursive answers look like
-        table("Top recursive answers (24h, NIOS-X-side)",
+        # Row 4: NIOS-X-side — what was actually resolved
+        table("Top recursive answers (24h, on NIOS-X)",
               f"{REC} AND _exists_:qname",
               row_field="qname", row_limit=20,
               series=[
@@ -502,9 +500,8 @@ def page_recursive_dns():
                   ("last rc",  "latest(rcode)"),
               ],
               pos={"col": 1, "row": 12, "width": 12, "height": 5}),
-        # Row 5: top recursive clients (mostly the NIOS auth forwarders)
-        # + rcode + qtype mix
-        table("Top recursive clients (24h)",
+        # Row 5: who's asking NIOS-X (NIOS members vs direct endpoints)
+        table("Top NIOS-X clients (24h)",
               f"{REC} AND _exists_:client_ip",
               row_field="client_ip", row_limit=10,
               series=[
@@ -517,7 +514,7 @@ def page_recursive_dns():
             f"{REC} AND _exists_:rcode",
             field="rcode",
             pos={"col": 7, "row": 17, "width": 3, "height": 5}),
-        pie("Recursive query type mix (24h)",
+        pie("Recursive qtype mix (24h)",
             f"{REC} AND _exists_:qtype",
             field="qtype",
             pos={"col": 10, "row": 17, "width": 3, "height": 5}),
