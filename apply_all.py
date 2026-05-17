@@ -90,6 +90,9 @@ STEPS = [
          ["python3", "pipelines/apply.py", "pipelines/nios_grid.json"]),
     step("pipelines", "NIOS DNS Role (auth vs forward tagging on darknetian.com)",
          ["python3", "pipelines/apply.py", "pipelines/nios_dns_role.json"]),
+    step("pipelines", "Synology DSM (nas_category + connection + AFP) + connect to NAS streams",
+         ["python3", "pipelines/apply.py", "pipelines/synology.json",
+          "--connect=NAS", "--connect=NAS (IP-form)"]),
     step("pipelines", "Aruba extraction rules + pipeline",
          ["python3", "pipelines/apply.py", "pipelines/aruba.json"]),
     step("pipelines", "VMware vmware_app extraction rules + ESXI pipeline",
@@ -116,6 +119,8 @@ STEPS = [
          ["python3", "dashboards/palo_alto.py"]),
     step("dashboards", "Infoblox — Operations",
          ["python3", "dashboards/infoblox_ops.py"]),
+    step("dashboards", "Synology — DSM",
+         ["python3", "dashboards/synology.py"]),
     step("dashboards", "Home Assistant — logs",
          ["python3", "dashboards/ha_logs.py"]),
 ]

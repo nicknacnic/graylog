@@ -1,0 +1,38 @@
+{
+  "pipeline": {
+    "title": "Synology DSM (category + connection + AFP)",
+    "description": "Extract nas_category from the DSM BSD-syslog prefix, then a second stage with per-category parsers for the high-value ones: Connection (user/IP/auth result) and MacFileService Event (AFP op/path/size). Other categories fall through with just the category set. Connect to the 'NAS' stream.",
+    "stages": [
+      {
+        "stage": 0,
+        "match": "EITHER",
+        "rules": ["nas extract category"]
+      },
+      {
+        "stage": 1,
+        "match": "EITHER",
+        "rules": [
+          "nas connection event extract",
+          "nas afp event extract"
+        ]
+      }
+    ]
+  },
+  "rules": [
+    {
+      "title": "nas extract category",
+      "description": "DSM BSD-syslog body is 'nas <Category>: <details>'. Pulls the category (Connection, System, MacFileService Event, SMB, WebDAV, FTP, AFP, TFTP, Backup, Network Backup, File Station Event, etc.) into nas_category for slicing.",
+      "source": "rule \"nas extract category\"\nwhen\n  has_field(\"message\")\nthen\n  let msg = to_string($message.message);\n  let m = regex(\"^nas\\\\s+([A-Za-z][A-Za-z0-9_ ]*?):\\\\s*(.*)$\", msg);\n  set_field(\"nas_category\", to_string(m[\"0\"]));\n  set_field(\"nas_detail\", to_string(m[\"1\"]));\nend"
+    },
+    {
+      "title": "nas connection event extract",
+      "description": "Connection lines look like 'User [<user>] from [<ip>] signed in to [<target>] successfully via [<method>].' Pulls user / client_ip / action / target / result / auth_method.",
+      "source": "rule \"nas connection event extract\"\nwhen\n  has_field(\"nas_category\") &&\n  to_string($message.nas_category) == \"Connection\"\nthen\n  let body = to_string($message.nas_detail);\n  let u = regex(\"User\\\\s+\\\\[([^\\\\]]+)\\\\]\\\\s+from\\\\s+\\\\[([^\\\\]]+)\\\\]\\\\s+(signed\\\\s+in|signed\\\\s+out|failed\\\\s+to\\\\s+sign\\\\s+in|tried\\\\s+to\\\\s+sign\\\\s+in)\\\\s+to\\\\s+\\\\[([^\\\\]]+)\\\\](?:\\\\s+(\\\\w+))?(?:\\\\s+via\\\\s+\\\\[([^\\\\]]+)\\\\])?\", body);\n  set_field(\"nas_user\",        to_string(u[\"0\"]));\n  set_field(\"nas_client_ip\",   to_string(u[\"1\"]));\n  set_field(\"nas_action\",      to_string(u[\"2\"]));\n  set_field(\"nas_target\",      to_string(u[\"3\"]));\n  set_field(\"nas_result\",      to_string(u[\"4\"]));\n  set_field(\"nas_auth_method\", to_string(u[\"5\"]));\nend"
+    },
+    {
+      "title": "nas afp event extract",
+      "description": "MacFileService Event lines look like '<OP>, Path: <path>, File/Folder: <kind>, Size: <n> <unit>, User: <user>, IP: <ip>'. Pulls op / path / file_kind / size_bytes / user / client_ip.",
+      "source": "rule \"nas afp event extract\"\nwhen\n  has_field(\"nas_category\") &&\n  to_string($message.nas_category) == \"MacFileService Event\"\nthen\n  let body = to_string($message.nas_detail);\n  let p = regex(\"^([A-Za-z0-9_]+),\\\\s+Path:\\\\s+([^,]+),\\\\s+File/Folder:\\\\s+(File|Folder)(?:,\\\\s+Size:\\\\s+([0-9]+)\\\\s*\\\\w*)?,?\\\\s*User:\\\\s+(\\\\S+),\\\\s+IP:\\\\s+([0-9.]+)\", body);\n  set_field(\"nas_afp_op\",     to_string(p[\"0\"]));\n  set_field(\"nas_path\",       to_string(p[\"1\"]));\n  set_field(\"nas_file_kind\",  to_string(p[\"2\"]));\n  set_field(\"nas_size_bytes\", to_string(p[\"3\"]));\n  set_field(\"nas_user\",       to_string(p[\"4\"]));\n  set_field(\"nas_client_ip\",  to_string(p[\"5\"]));\nend"
+    }
+  ]
+}
