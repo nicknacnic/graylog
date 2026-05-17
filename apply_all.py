@@ -116,6 +116,8 @@ STEPS = [
          ["python3", "dashboards/palo_alto.py"]),
     step("dashboards", "Infoblox — Operations",
          ["python3", "dashboards/infoblox_ops.py"]),
+    step("dashboards", "Home Assistant — logs",
+         ["python3", "dashboards/ha_logs.py"]),
 ]
 
 

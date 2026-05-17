@@ -1,0 +1,23 @@
+[Unit]
+Description=Home Assistant core logs → Graylog (GELF)
+After=network-online.target graylog-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ha-log-poller
+Group=ha-log-poller
+EnvironmentFile=/etc/ha-log-poller/env
+ExecStart=/usr/bin/python3 /opt/ha-log-poller/ha_log_poller.py
+ReadWritePaths=/var/lib/ha-log-poller
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true

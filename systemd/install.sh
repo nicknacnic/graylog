@@ -143,6 +143,44 @@ EOF
 
 install_csp_poller
 
+# HA core-log poller — pulls /api/hassio/core/logs from Home Assistant
+# and ships WARNING+/ERROR/CRITICAL as GELF. Single-unit shape.
+install_ha_log_poller() {
+  local user=ha-log-poller
+  local src=pollers/ha_log_poller.py
+
+  if [[ ! -f "$src" ]]; then
+    echo "skip ha-log-poller (no $src in repo)"
+    return
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -o root -g root -m 0755 /opt/ha-log-poller
+  install -m 0755 "$src" /opt/ha-log-poller/
+  install -d -o "$user" -g "$user" -m 0750 /var/lib/ha-log-poller
+  install -d -o root -g "$user" -m 0750 /etc/ha-log-poller
+  if [[ ! -f /etc/ha-log-poller/env ]]; then
+    cat > /etc/ha-log-poller/env <<'EOF'
+# Home Assistant long-lived access token. Generate at:
+#   HA -> Profile -> Long-lived access tokens
+HA_URL=http://10.10.0.220:8123
+HA_TOKEN=
+# WARNING and above by default. Add INFO if you want it (chatty).
+HA_LOG_LEVELS=WARNING,ERROR,CRITICAL
+HA_HOST_LABEL=ha-darknetian
+GELF_URL=http://127.0.0.1:12202/gelf
+EOF
+    chmod 0640 /etc/ha-log-poller/env
+    chown root:"$user" /etc/ha-log-poller/env
+    echo "NOTE: edit /etc/ha-log-poller/env to add HA_TOKEN"
+  fi
+  install -m 0644 systemd/ha-log-poller.service /etc/systemd/system/
+  install -m 0644 systemd/ha-log-poller.timer   /etc/systemd/system/
+}
+
+install_ha_log_poller
+
 # Auto-rotate watchdog: watches Graylog's indexer-failures count and
 # rotates the offending index set when it spikes. Same single-unit
 # shape as cf-poller.
@@ -190,6 +228,7 @@ systemctl enable --now \
   idrac-poller-health.timer idrac-poller-logs.timer \
   cf-poller.timer \
   csp-poller.timer \
+  ha-log-poller.timer \
   graylog-auto-rotate.timer
 
 echo "installed. Status:"
@@ -198,4 +237,5 @@ systemctl --no-pager status \
   idrac-poller-health.timer idrac-poller-logs.timer \
   cf-poller.timer \
   csp-poller.timer \
+  ha-log-poller.timer \
   graylog-auto-rotate.timer || true
