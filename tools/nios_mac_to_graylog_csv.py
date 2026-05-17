@@ -140,7 +140,7 @@ def main() -> None:
     #     `record:fixedaddress` is rejected as Unknown object type).
     #   - `binding_state` is not a server-side searchable field; filter
     #     client-side after pulling all lease records.
-    fixedaddrs = leases = None
+    fixedaddrs = leases = hosts = None
     used_host = None
     for host in NIOS_HOSTS:
         base = f"https://{host}/wapi/{WAPI_VER}"
@@ -153,20 +153,37 @@ def main() -> None:
                 sess, base, "lease",
                 return_fields="hardware,client_hostname,address,binding_state",
             )
+            hosts = wapi_list(
+                sess, base, "record:host",
+                return_fields="name,ipv4addrs",
+            )
             used_host = host
             break
         except (requests.ConnectionError, requests.Timeout) as e:
             print(f"  NIOS host {host} unreachable: {e}", file=sys.stderr)
             continue
-    if fixedaddrs is None or leases is None:
+    if fixedaddrs is None or leases is None or hosts is None:
         die(f"None of NIOS hosts reachable: {NIOS_HOSTS}")
     # Client-side filter: only keep ACTIVE leases (binding_state isn't searchable)
     leases = [ls for ls in leases if (ls.get("binding_state") or "").upper() == "ACTIVE"]
     print(f"  WAPI source: {used_host}")
 
-    # Merge: prefer fixedaddress.name; fall back to lease.client_hostname.
-    # Also fall back to the lease's IP-based PTR (if we had it; not loaded here).
+    # Merge: prefer record:host (current canonical source; combines A+PTR+DHCP),
+    # then fixedaddress.name, then lease.client_hostname.
+    # Host record's `name` is FQDN; we want the bare label for graylog enrichment.
     mac_to_name: dict[str, str] = {}
+
+    for h in hosts:
+        fqdn = norm_hostname(h.get("name"))
+        label = fqdn.split(".", 1)[0] if fqdn else ""
+        if not label or label in HOSTNAME_BLACKLIST:
+            continue
+        for addr in (h.get("ipv4addrs") or []):
+            mac = norm_mac(addr.get("mac"))
+            ip = (addr.get("ipv4addr") or "").strip()
+            if not mac or not in_subnet(ip, subnet):
+                continue
+            mac_to_name[mac] = label
 
     for fa in fixedaddrs:
         mac = norm_mac(fa.get("mac"))
@@ -174,6 +191,8 @@ def main() -> None:
         name = norm_hostname(fa.get("name"))
         if not mac or not in_subnet(ip, subnet):
             continue
+        if mac in mac_to_name:
+            continue  # host record won
         if name and name not in HOSTNAME_BLACKLIST:
             mac_to_name[mac] = name
 
@@ -206,7 +225,8 @@ def main() -> None:
             w.writerow([mac, host])
     os.replace(tmp_path, OUT_PATH)
     print(f"Wrote {len(mac_to_name)} MAC mappings to {OUT_PATH} "
-          f"(fixedaddrs={len(fixedaddrs)}, leases={len(leases)}, source={used_host})")
+          f"(hosts={len(hosts)}, fixedaddrs={len(fixedaddrs)}, leases={len(leases)}, "
+          f"source={used_host})")
 
 
 if __name__ == "__main__":
