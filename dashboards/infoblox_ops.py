@@ -645,6 +645,98 @@ def page_infoblox_iq():
     ]
 
 
+def page_infoblox_iq_mcp():
+    """Infoblox IQ - MCP — per-DFP DNS query activity for LAYER8-NIOSX.
+
+    Source: pollers/mcp_poller.py polls the `PortunusDnsLogs` cube every
+    5 minutes scoped to `network = "LAYER8 NIOS-X (DFP)"`. Discovered
+    via the CSP MCP gateway catalog (hence the page name) — it's where
+    DFP-attributed DNS query data actually lives, in contrast to the
+    `*_iq` HostMetrics rollups on the Infoblox IQ page.
+
+    Fields:
+      csp_metric           dfp_requests_total | dfp_top_* (per dimension)
+      csp_scope            'dfp_host'
+      csp_value            request count for the row's bucket
+      csp_network          DFP service name (e.g. 'LAYER8 NIOS-X (DFP)')
+      dfp_qname / dfp_qip / dfp_policy_action / dfp_tclass /
+      dfp_tfamily / dfp_feed_name / dfp_app_category /
+      dfp_dns_view / dfp_response
+    """
+    return [
+        # ── Row 1 — headline tiles (1h) ────────────────────────────
+        numeric("Total queries (1h)",
+                "csp_metric:dfp_requests_total",
+                "latest(csp_value)", timerange=HOUR,
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="reqs"),
+        numeric("Blocked (1h)",
+                "csp_metric:dfp_top_policy_action AND dfp_policy_action:Block",
+                "sum(csp_value)", timerange=HOUR,
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="blocks"),
+        numeric("Distinct clients (1h)",
+                "csp_metric:dfp_top_qip",
+                "cardinality(dfp_qip)", timerange=HOUR,
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="qips"),
+        numeric("Distinct threat classes (1h)",
+                "csp_metric:dfp_top_tclass",
+                "cardinality(dfp_tclass)", timerange=HOUR,
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="classes"),
+
+        # ── Row 2 — request volume + breakdowns over 24h ──────────
+        line_ts("Requests over 24h",
+                "csp_metric:dfp_requests_total",
+                series=[("reqs", "max(csp_value)")],
+                pos={"col": 1, "row": 3, "width": 6, "height": 4}),
+        line_ts("Policy actions over 24h",
+                "csp_metric:dfp_top_policy_action",
+                series=[("reqs", "max(csp_value)")],
+                column_field="dfp_policy_action",
+                pos={"col": 7, "row": 3, "width": 6, "height": 4}),
+
+        # ── Row 3 — rcode + DNS view ──────────────────────────────
+        pie("Query types (24h)",
+            "csp_metric:dfp_top_qtype",
+            field="dfp_qtype",
+            pos={"col": 1, "row": 7, "width": 6, "height": 4}),
+        bar("DNS views in use (24h)",
+            "csp_metric:dfp_top_dns_view",
+            field="dfp_dns_view",
+            pos={"col": 7, "row": 7, "width": 6, "height": 4}),
+
+        # ── Row 4 — top qnames table ──────────────────────────────
+        table("Top qnames (24h)",
+              "csp_metric:dfp_top_qname",
+              row_field="dfp_qname", row_limit=25,
+              series=[("requests", "max(csp_value)")],
+              pos={"col": 1, "row": 11, "width": 6, "height": 6}),
+        table("Top clients / qips (24h)",
+              "csp_metric:dfp_top_qip",
+              row_field="dfp_qip", row_limit=25,
+              series=[("requests", "max(csp_value)")],
+              pos={"col": 7, "row": 11, "width": 6, "height": 6}),
+
+        # ── Row 5 — threat intel cuts ─────────────────────────────
+        bar("Top threat classes (24h)",
+            "csp_metric:dfp_top_tclass",
+            field="dfp_tclass",
+            pos={"col": 1, "row": 17, "width": 4, "height": 4}),
+        bar("Top threat families (24h)",
+            "csp_metric:dfp_top_tfamily",
+            field="dfp_tfamily",
+            pos={"col": 5, "row": 17, "width": 4, "height": 4}),
+        bar("Top intel feeds firing (24h)",
+            "csp_metric:dfp_top_feed_name",
+            field="dfp_feed_name",
+            pos={"col": 9, "row": 17, "width": 4, "height": 4}),
+
+        # ── Row 6 — app awareness ─────────────────────────────────
+        bar("Top app categories (24h)",
+            "csp_metric:dfp_top_app_category",
+            field="dfp_app_category",
+            pos={"col": 1, "row": 21, "width": 12, "height": 4}),
+    ]
+
+
 def page_dhcp_ops_legacy():
     """Legacy page — kept for reference but no longer wired into build().
     The new page_dhcp() scoped to NIOS DHCP stream supersedes this."""
@@ -774,9 +866,10 @@ def build():
         ("Reporting",       page_reporting,      DAY, [TR_STREAM]),
     ]
     if csp_streams:
-        page_defs.append(("Infoblox IQ", page_infoblox_iq, DAY, csp_streams))
+        page_defs.append(("Infoblox IQ",       page_infoblox_iq,     DAY, csp_streams))
+        page_defs.append(("Infoblox CubeJS API", page_infoblox_iq_mcp, DAY, csp_streams))
     else:
-        print("  (Infoblox CSP stream not found — run indexing/csp.py first to add the IQ page)")
+        print("  (Infoblox CSP stream not found — run indexing/csp.py first to add the IQ pages)")
     pages_for_search, pages_for_view = [], []
     for title, fn, tr, streams in page_defs:
         qid = gl.gen_id()
