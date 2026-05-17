@@ -453,16 +453,24 @@ AGENT_FQDNS = [
     # org index + canonical endpoint
     "index._agents.darknetian.com",
     "endpoint.darknetian.com",
+    # ANS (Agent Name Service) transparency-log records — added 2026-05-15
+    # per src/posts/2026-05-15-the-thing-the-index-points-to.md. The TL
+    # host is queried by anything resolving the path-2 index leaf above
+    # (which targets it via SVCB).
+    "ans.darknetian.com",
 ]
 
 
 def _agent_name_from_qname(qname: str) -> str | None:
     """Extract the agent name from a query name. Returns one of
-    'search', 'bookings', 'threat-intel', 'dns-audit', 'morpheus', or
-    None if the qname is index/endpoint/unrelated."""
+    'search', 'bookings', 'threat-intel', 'dns-audit', 'morpheus',
+    'ans' (transparency-log host + path-2 index leaf), or None
+    if the qname is unrelated."""
     q = (qname or "").lower().rstrip(".")
     if not q.endswith(".darknetian.com"):
         return None
+    if q == "ans.darknetian.com" or q == "index._agents.darknetian.com":
+        return "ans"
     for agent in ("search", "bookings", "threat-intel", "dns-audit", "morpheus"):
         # Matches: <agent>.darknetian.com, <agent>._agents.darknetian.com,
         # _443._tcp.<agent>.darknetian.com
@@ -471,6 +479,51 @@ def _agent_name_from_qname(qname: str) -> str | None:
            or q == f"_443._tcp.{agent}.darknetian.com":
             return agent
     return None
+
+
+def poll_dns_nxdomain(zone: dict, start: str, end: str) -> None:
+    """NXDOMAIN-only DNS analytics with queryName included. Kept as a
+    separate poll so the main `poll_dns` summary stays low-cardinality
+    (no queryName), while this one — gated to responseCode=NXDOMAIN —
+    is naturally narrow (failing names are typically a small set)."""
+    q = """
+    query($zoneTag: String!, $start: Time!, $end: Time!) {
+      viewer {
+        zones(filter: {zoneTag: $zoneTag}) {
+          dnsAnalyticsAdaptiveGroups(
+            limit: 200,
+            filter: {datetime_geq: $start, datetime_lt: $end,
+                     responseCode: "NXDOMAIN"},
+            orderBy: [count_DESC]
+          ) {
+            dimensions { queryName queryType }
+            count
+          }
+        }
+      }
+    }
+    """
+    try:
+        data = cf_graphql(q, {"zoneTag": zone["id"], "start": start, "end": end})
+    except RuntimeError as e:
+        if "not authorized" in str(e).lower():
+            return
+        raise
+    zones = ((data.get("viewer") or {}).get("zones")) or []
+    if not zones:
+        return
+    for g in (zones[0].get("dnsAnalyticsAdaptiveGroups") or []):
+        dim = g.get("dimensions") or {}
+        gelf(
+            f"DNS-NX {zone['name']} {dim.get('queryName')} {dim.get('queryType')} x{g.get('count')}",
+            host=f"cloudflare-{zone['name']}",
+            cf_event_type="dns_nxdomain",
+            cf_zone_name=zone["name"],
+            cf_dns_query_name=dim.get("queryName"),
+            cf_dns_query_type=dim.get("queryType"),
+            cf_dns_response_code="NXDOMAIN",
+            cf_dns_queries=g.get("count"),
+        )
 
 
 def poll_dns_agents(zone: dict, start: str, end: str) -> None:
@@ -607,6 +660,7 @@ def main() -> None:
         _safe(f"{zone['name']}:http_status",  lambda z=zone: poll_http_by_status(z, start, end))
         _safe(f"{zone['name']}:firewall",     lambda z=zone: poll_firewall_events(z, start, end, state))
         _safe(f"{zone['name']}:dns",          lambda z=zone: poll_dns(z, start, end))
+        _safe(f"{zone['name']}:dns_nxdomain", lambda z=zone: poll_dns_nxdomain(z, start, end))
         _safe(f"{zone['name']}:dns_agents",   lambda z=zone: poll_dns_agents(z, start, end))
 
     _safe("audit_logs", lambda: poll_audit_logs(start, state))

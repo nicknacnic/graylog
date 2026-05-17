@@ -259,29 +259,38 @@ def page_dns_audit() -> list[dict]:
             "cf_event_type:dns_summary",
             field="cf_dns_response_code",
             pos={"col": 7, "row": 6, "width": 6, "height": 4}),
+        # DNS Row 4: top NXDOMAIN qnames (24h) — fed by poll_dns_nxdomain
+        # which is a separate NXDOMAIN-only poll with queryName included.
+        table("Top NXDOMAIN qnames (24h)",
+              "cf_event_type:dns_nxdomain",
+              row_field="cf_dns_query_name",
+              series=[("queries",   "sum(cf_dns_queries)"),
+                      ("qtypes",    "cardinality(cf_dns_query_type)"),
+                      ("zone",      "latest(cf_zone_name)")],
+              pos={"col": 1, "row": 10, "width": 12, "height": 5}, row_limit=25),
         # Audit Row 1: numbers
         numeric("Audit events (7d)", "cf_event_type:audit_log",
-                "count()", pos={"col": 1, "row": 10, "width": 3, "height": 2}, name="ev"),
+                "count()", pos={"col": 1, "row": 15, "width": 3, "height": 2}, name="ev"),
         numeric("Distinct actors (7d)", "cf_event_type:audit_log",
                 "cardinality(cf_audit_actor)",
-                pos={"col": 4, "row": 10, "width": 3, "height": 2}, name="actors"),
+                pos={"col": 4, "row": 15, "width": 3, "height": 2}, name="actors"),
         numeric("Distinct action types (7d)", "cf_event_type:audit_log",
                 "cardinality(cf_audit_action)",
-                pos={"col": 7, "row": 10, "width": 3, "height": 2}, name="types"),
+                pos={"col": 7, "row": 15, "width": 3, "height": 2}, name="types"),
         # Audit Row 2: tables
         bar_categorical("Actions (7d)",
                         "cf_event_type:audit_log",
                         field="cf_audit_action",
-                        pos={"col": 1, "row": 12, "width": 6, "height": 4},
+                        pos={"col": 1, "row": 17, "width": 6, "height": 4},
                         timerange=WEEK, row_limit=15),
         bar_categorical("Resource types touched (7d)",
                         "cf_event_type:audit_log",
                         field="cf_audit_resource_type",
-                        pos={"col": 7, "row": 12, "width": 6, "height": 4},
+                        pos={"col": 7, "row": 17, "width": 6, "height": 4},
                         timerange=WEEK, row_limit=15),
         # Recent audit events
         messages_list("Recent audit events (7d)", "cf_event_type:audit_log",
-                      pos={"col": 1, "row": 16, "width": 12, "height": 6},
+                      pos={"col": 1, "row": 21, "width": 12, "height": 6},
                       timerange=WEEK),
     ]
 
@@ -357,6 +366,17 @@ def page_agents() -> list[dict]:
                       ("distinct agents", "cardinality(cf_dns_agent)"),
                       ("records hit",     "cardinality(cf_dns_query_name)")],
               pos={"col": 1, "row": 16, "width": 12, "height": 5}, row_limit=25),
+        # Row 6: ANS-specific lookups — `ans.darknetian.com` (TL host) and
+        # `index._agents.darknetian.com` (path-2 index SVCB leaf). Both are
+        # managed-by-darknetian-ans records per the 2026-05-15 post.
+        table("ANS lookups — TL host + path-2 index (24h)",
+              "cf_event_type:dns_agent AND cf_dns_agent:ans",
+              row_field="cf_dns_query_name",
+              series=[("queries",          "sum(cf_dns_queries)"),
+                      ("unique resolvers", "cardinality(cf_dns_source_ip)"),
+                      ("query types",      "cardinality(cf_dns_query_type)"),
+                      ("response codes",   "cardinality(cf_dns_response_code)")],
+              pos={"col": 1, "row": 21, "width": 12, "height": 5}, row_limit=10),
     ]
 
 
@@ -368,7 +388,7 @@ def build():
         ("Traffic", page_traffic, DAY),
         ("Threats", page_threats, DAY),
         ("DNS & Audit", page_dns_audit, WEEK),
-        ("Agents", page_agents, DAY),
+        ("Agents", page_agents, WEEK),
     ]
     pages_for_search: list[dict] = []
     pages_for_view: list[dict] = []
