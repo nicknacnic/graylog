@@ -2,8 +2,15 @@
 
 Idempotent: rules matched by title are updated (PUT); new ones are created
 (POST). The pipeline itself is matched by title; if it doesn't already exist
-it's created. Stream-to-pipeline connections are NOT managed here — those
-were set up in the UI when the stream was first created.
+it's created. Supports multi-stage pipelines.
+
+Optionally connects the pipeline to one or more streams (by title):
+
+    python3 pipelines/apply.py pipelines/synology.json --connect=NAS
+    python3 pipelines/apply.py pipelines/foo.json --connect=A --connect=B
+
+The connection is additive — if other pipelines are already wired into the
+stream they're preserved.
 
 Usage:
     source env.sh && python3 pipelines/apply.py pipelines/cradlepoint.json
@@ -19,41 +26,71 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import graylog as gl  # noqa: E402
 
 
-def apply(spec_path: str) -> None:
+def _build_source(pipeline_spec: dict) -> str:
+    title = pipeline_spec["title"]
+    parts = [f'pipeline "{title}"']
+    for stage in pipeline_spec["stages"]:
+        match = stage.get("match", "either").lower()
+        parts.append(f'stage {stage["stage"]} match {match}')
+        for r in stage["rules"]:
+            parts.append(f'  rule "{r}"')
+    parts.append("end")
+    return "\n".join(parts)
+
+
+def _stream_by_title(title: str) -> dict | None:
+    for s in (gl.api("GET", "streams") or {}).get("streams", []):
+        if s.get("title") == title:
+            return s
+    return None
+
+
+def _connect_pipeline_to_stream(pipeline_id: str, stream_title: str) -> None:
+    stream = _stream_by_title(stream_title)
+    if not stream:
+        print(f"  WARN: stream {stream_title!r} not found — skipping connect")
+        return
+    sid = stream["id"]
+    # Fetch existing connections for this stream — 404 just means none yet.
+    try:
+        existing = gl.api("GET", f"system/pipelines/connections/to_stream/{sid}") or {}
+    except RuntimeError as e:
+        if "404" in str(e):
+            existing = {}
+        else:
+            raise
+    pipeline_ids = list(existing.get("pipeline_ids") or [])
+    if pipeline_id in pipeline_ids:
+        print(f"  pipeline already connected to stream {stream_title!r} (id={sid})")
+        return
+    pipeline_ids.append(pipeline_id)
+    gl.api("POST", "system/pipelines/connections/to_stream",
+           {"stream_id": sid, "pipeline_ids": pipeline_ids})
+    print(f"  CONNECT pipeline {pipeline_id} → stream {stream_title!r} (id={sid})")
+
+
+def apply(spec_path: str, connect_titles: list[str]) -> None:
     spec = json.loads(Path(spec_path).read_text())
     rules = spec["rules"]
     pipeline_spec = spec["pipeline"]
 
-    # Index existing rules by title
     existing_rules = {r["title"]: r for r in gl.api("GET", "system/pipelines/rule")}
-
     for r in rules:
         title = r["title"]
         if title in existing_rules:
             rid = existing_rules[title]["id"]
-            body = {**r, "id": rid}
-            gl.api("PUT", f"system/pipelines/rule/{rid}", body)
+            gl.api("PUT", f"system/pipelines/rule/{rid}", {**r, "id": rid})
             print(f"  PUT  rule {title!r:40s} id={rid}")
         else:
             resp = gl.api("POST", "system/pipelines/rule", r)
             print(f"  POST rule {title!r:40s} id={resp['id']}")
 
-    # Build the pipeline source from the stages list
     title = pipeline_spec["title"]
-    rule_names = pipeline_spec["stages"][0]["rules"]
-    rules_block = "\n".join(f'  rule "{n}"' for n in rule_names)
-    source = (
-        f'pipeline "{title}"\n'
-        f'stage 0 match either\n'
-        f'{rules_block}\n'
-        f'end'
-    )
     body = {
         "title": title,
         "description": pipeline_spec.get("description", ""),
-        "source": source,
+        "source": _build_source(pipeline_spec),
     }
-
     existing_pipelines = {p["title"]: p for p in gl.api("GET", "system/pipelines/pipeline")}
     if title in existing_pipelines:
         pid = existing_pipelines[title]["id"]
@@ -61,13 +98,25 @@ def apply(spec_path: str) -> None:
         print(f"  PUT  pipeline {title!r:35s} id={pid}")
     else:
         resp = gl.api("POST", "system/pipelines/pipeline", body)
-        print(f"  POST pipeline {title!r:35s} id={resp['id']}")
-        print("  NOTE: connect this pipeline to its stream in the UI "
-              "(System -> Pipelines -> Manage rule connections)")
+        pid = resp["id"]
+        print(f"  POST pipeline {title!r:35s} id={pid}")
+
+    for st in connect_titles:
+        _connect_pipeline_to_stream(pid, st)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("usage: apply.py <spec.json>", file=sys.stderr)
+    args = sys.argv[1:]
+    connect_titles: list[str] = []
+    spec_path: str | None = None
+    for a in args:
+        if a.startswith("--connect="):
+            connect_titles.append(a.split("=", 1)[1])
+        elif spec_path is None:
+            spec_path = a
+        else:
+            print(f"unexpected arg: {a}", file=sys.stderr); sys.exit(2)
+    if not spec_path:
+        print("usage: apply.py <spec.json> [--connect=<stream_title> ...]", file=sys.stderr)
         sys.exit(2)
-    apply(sys.argv[1])
+    apply(spec_path, connect_titles)
