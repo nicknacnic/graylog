@@ -143,6 +143,44 @@ EOF
 
 install_csp_poller
 
+# MCP poller — Portunus DNS logs (per-DFP query attribution) for the
+# "Infoblox IQ - MCP" dashboard page. Same single-unit shape as cf-poller.
+install_mcp_poller() {
+  local user=mcp-poller
+  local src=pollers/mcp_poller.py
+
+  if [[ ! -f "$src" ]]; then
+    echo "skip mcp-poller (no $src in repo)"
+    return
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -o root -g root -m 0755 /opt/mcp-poller
+  install -m 0755 "$src" /opt/mcp-poller/
+  install -d -o "$user" -g "$user" -m 0750 /var/lib/mcp-poller
+  install -d -o root -g "$user" -m 0750 /etc/mcp-poller
+  if [[ ! -f /etc/mcp-poller/env ]]; then
+    cat > /etc/mcp-poller/env <<'EOF'
+# Infoblox CSP read-scope API key (same key the csp-poller uses).
+INFOBLOX_API_KEY=
+# DFP `network` value as it appears in PortunusDnsLogs. For the
+# LAYER8 homelab NIOS-X this is exactly:
+MCP_DFP_NETWORK=LAYER8 NIOS-X (DFP)
+MCP_LOOKBACK_MIN=60
+MCP_TOP_N=25
+GELF_URL=http://127.0.0.1:12202/gelf
+EOF
+    chmod 0640 /etc/mcp-poller/env
+    chown root:"$user" /etc/mcp-poller/env
+    echo "NOTE: edit /etc/mcp-poller/env to add INFOBLOX_API_KEY"
+  fi
+  install -m 0644 systemd/mcp-poller.service /etc/systemd/system/
+  install -m 0644 systemd/mcp-poller.timer   /etc/systemd/system/
+}
+
+install_mcp_poller
+
 # HA core-log poller — pulls /api/hassio/core/logs from Home Assistant
 # and ships WARNING+/ERROR/CRITICAL as GELF. Single-unit shape.
 install_ha_log_poller() {
@@ -228,6 +266,7 @@ systemctl enable --now \
   idrac-poller-health.timer idrac-poller-logs.timer \
   cf-poller.timer \
   csp-poller.timer \
+  mcp-poller.timer \
   ha-log-poller.timer \
   graylog-auto-rotate.timer
 
@@ -237,5 +276,6 @@ systemctl --no-pager status \
   idrac-poller-health.timer idrac-poller-logs.timer \
   cf-poller.timer \
   csp-poller.timer \
+  mcp-poller.timer \
   ha-log-poller.timer \
   graylog-auto-rotate.timer || true
