@@ -101,6 +101,8 @@ STEPS = [
          ["python3", "pipelines/apply.py", "pipelines/mac_enrichment.json"]),
     step("pipelines", "Splice destination_fqdn rule into Enrichment pipeline",
          ["python3", "pipelines/extend_enrichment_destination.py"]),
+    step("pipelines", "Splice dfp_qip normalize rule + wire CSP stream to Enrichment",
+         ["python3", "pipelines/extend_enrichment_csp.py"]),
 
     # ── 5. Dashboards ──────────────────────────────────────────────────────
     step("dashboards", "Cradlepoint E300",

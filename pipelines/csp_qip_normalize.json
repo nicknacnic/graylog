@@ -1,0 +1,9 @@
+{
+  "rules": [
+    {
+      "title": "ipam normalize client_ip from dfp_qip",
+      "description": "CSP CubeJS dfp_top_qip rows carry the querier IP in dfp_qip. Promote it to client_ip so the IPAM enrichment chain (PTR + DHCP) fires for the Infoblox CubeJS / IQ-MCP dashboard pages.",
+      "source": "rule \"ipam normalize client_ip from dfp_qip\"\nwhen\n  has_field(\"dfp_qip\") &&\n  !has_field(\"client_ip\")\nthen\n  set_field(\"client_ip\", to_string($message.dfp_qip));\nend"
+    }
+  ]
+}

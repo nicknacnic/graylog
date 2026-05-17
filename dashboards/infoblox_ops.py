@@ -712,7 +712,8 @@ def page_infoblox_iq_mcp():
         table("Top clients / qips (24h)",
               "csp_metric:dfp_top_qip",
               row_field="dfp_qip", row_limit=25,
-              series=[("requests", "max(csp_value)")],
+              series=[("requests",         "max(csp_value)"),
+                      ("name (PTR)",       "latest(client_fqdn)")],
               pos={"col": 7, "row": 11, "width": 6, "height": 6}),
 
         # ── Row 5 — threat intel cuts ─────────────────────────────
