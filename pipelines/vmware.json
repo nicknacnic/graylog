@@ -1,19 +1,13 @@
 {
   "pipeline": {
     "title": "ESXI",
-    "description": "VMware/vSphere extraction. Stage 0 drops known-noise patterns (snmpd LLDP_*). Stage 1 fills vmware_app from application_name when set (vCenter), else parses the leading syslog tag (ESXi hosts: Hostd, snmpd, Vpxa, vmkernel, etc.)",
+    "description": "VMware/vSphere extraction. Single stage runs the drop rule (drop_message() short-circuits matched messages) AND the two vmware_app extractors. Was previously split into stage 0 + stage 1, but Graylog stages with `match either` and a single rule whose `when` is False (the normal case for non-LLDP traffic) cause the stage to fail to advance, so stage 1 never ran for 99.9% of messages — vmware_app extraction silently dropped.",
     "stages": [
       {
         "stage": 0,
         "match": "EITHER",
         "rules": [
-          "drop esxi snmpd lldp noise"
-        ]
-      },
-      {
-        "stage": 1,
-        "match": "EITHER",
-        "rules": [
+          "drop esxi snmpd lldp noise",
           "vmware app from application_name",
           "vmware app from message"
         ]
