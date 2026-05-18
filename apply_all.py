@@ -105,6 +105,8 @@ STEPS = [
          ["python3", "pipelines/extend_enrichment_destination.py"]),
     step("pipelines", "Splice dfp_qip normalize rule + wire CSP stream to Enrichment",
          ["python3", "pipelines/extend_enrichment_csp.py"]),
+    step("pipelines", "Splice dns_client_ip normalize rule + wire NIOS dnstap stream to Enrichment",
+         ["python3", "pipelines/extend_enrichment_dnstap.py"]),
 
     # ── 5. Dashboards ──────────────────────────────────────────────────────
     step("dashboards", "Cradlepoint E300",

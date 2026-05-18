@@ -1,0 +1,9 @@
+{
+  "rules": [
+    {
+      "title": "ipam normalize client_ip from dns_client_ip",
+      "description": "NIOS dnstap events expose the querier IP in dns_client_ip. Promote to client_ip so the existing IPAM enrichment chain (PTR → client_fqdn) populates the Infoblox Operations dashboard's Auth DNS + Top Clients widgets.",
+      "source": "rule \"ipam normalize client_ip from dns_client_ip\"\nwhen\n  has_field(\"dns_client_ip\") &&\n  !has_field(\"client_ip\")\nthen\n  set_field(\"client_ip\", to_string($message.dns_client_ip));\nend"
+    }
+  ]
+}
