@@ -70,6 +70,8 @@ STEPS = [
          ["python3", "indexing/cloudflare.py"]),
     step("indexing", "Infoblox CSP (CubeJS / IQ metrics) index set + stream",
          ["python3", "indexing/csp.py"]),
+    step("indexing", "NIOS dnstap index set + stream (per-query GELF via dnscollector bridge)",
+         ["python3", "indexing/nios_dnstap.py"]),
 
     # ── 2. Inputs ──────────────────────────────────────────────────────────
     step("inputs", "GELF HTTP input on 127.0.0.1:12202 (for iLO poller)",
@@ -125,6 +127,8 @@ STEPS = [
          ["python3", "dashboards/synology.py"]),
     step("dashboards", "Home Assistant — logs",
          ["python3", "dashboards/ha_logs.py"]),
+    step("dashboards", "NIOS dnstap",
+         ["python3", "dashboards/nios_dnstap.py"]),
 ]
 
 

@@ -315,6 +315,43 @@ EOF
 
 install_cf_to_nios_sync
 
+# dnstap-collector — listens on :6000/tcp for NIOS dnstap (Frame Streams),
+# decodes with the dnscollector Go binary, pipes JSON to a small Python
+# bridge that reshapes to GELF and POSTs to the existing 12202 input.
+# Output lands in the "NIOS dnstap" stream (see indexing/nios_dnstap.py).
+install_dnstap_collector() {
+  local user=dnstap-collector
+  local cfg=pollers/dnstap_collector_config.yml
+  local bridge=pollers/dnstap_bridge.py
+  local svc=systemd/dnstap-collector.service
+
+  if [[ ! -f "$cfg" || ! -f "$bridge" ]]; then
+    echo "skip dnstap-collector (sources missing in repo)"
+    return
+  fi
+  if ! command -v dnscollector >/dev/null 2>&1; then
+    echo "NOTE: dnscollector binary not on PATH. Install:"
+    echo "  cd /tmp && curl -sSL -o ookla.tgz https://github.com/dmachard/dns-collector/releases/download/v2.2.3/DNS-collector_2.2.3_linux_amd64.tar.gz"
+    echo "  tar xzf ookla.tgz && install -m 0755 dnscollector /usr/local/bin/dnscollector"
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -o root -g root -m 0755 /opt/dnstap-bridge /etc/dnscollector
+  install -d -o "$user" -g "$user" -m 0755 /var/log/dnscollector
+  install -m 0755 "$bridge" /opt/dnstap-bridge/bridge.py
+  install -m 0644 "$cfg"    /etc/dnscollector/config.yml
+  install -m 0644 "$svc"    /etc/systemd/system/
+
+  # LAN-only firewall allow for :6000 so off-network hosts can't push
+  # arbitrary dnstap traffic into the collector.
+  if command -v ufw >/dev/null 2>&1; then
+    ufw allow from 10.10.0.0/24 to any port 6000 proto tcp comment "NIOS dnstap" >/dev/null 2>&1 || true
+  fi
+}
+
+install_dnstap_collector
+
 # Auto-rotate watchdog: watches Graylog's indexer-failures count and
 # rotates the offending index set when it spikes. Same single-unit
 # shape as cf-poller.
@@ -366,6 +403,7 @@ systemctl enable --now \
   ha-log-poller.timer \
   wan-perf-poller.timer \
   cf-to-nios-sync.timer \
+  dnstap-collector.service \
   graylog-auto-rotate.timer
 
 echo "installed. Status:"
@@ -378,4 +416,5 @@ systemctl --no-pager status \
   ha-log-poller.timer \
   wan-perf-poller.timer \
   cf-to-nios-sync.timer \
+  dnstap-collector.service \
   graylog-auto-rotate.timer || true

@@ -1,0 +1,26 @@
+[Unit]
+Description=dnscollector (NIOS dnstap → GELF) bridge
+After=network-online.target graylog-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dnstap-collector
+Group=dnstap-collector
+ExecStart=/bin/bash -c '/usr/local/bin/dnscollector --config /etc/dnscollector/config.yml | /usr/bin/python3 /opt/dnstap-bridge/bridge.py'
+Restart=on-failure
+RestartSec=5
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

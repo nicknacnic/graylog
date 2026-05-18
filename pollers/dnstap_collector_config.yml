@@ -1,0 +1,17 @@
+global:
+  trace:
+    verbose: true
+
+pipelines:
+  - name: nios
+    dnstap:
+      listen-ip: 0.0.0.0
+      listen-port: 6000
+      tls-support: false
+    routing-policy:
+      forward: [bridge]
+      dropped: []
+
+  - name: bridge
+    stdout:
+      mode: json
