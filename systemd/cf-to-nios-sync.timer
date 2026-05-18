@@ -1,0 +1,10 @@
+[Unit]
+Description=Run CF→NIOS darknetian.com sync daily
+
+[Timer]
+OnCalendar=*-*-* 04:17:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

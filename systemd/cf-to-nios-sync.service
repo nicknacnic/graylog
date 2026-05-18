@@ -1,0 +1,22 @@
+[Unit]
+Description=Cloudflare → NIOS darknetian.com record sync (additive, idempotent)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cf-to-nios-sync
+Group=cf-to-nios-sync
+EnvironmentFile=/etc/cf-to-nios-sync/env
+ExecStart=/usr/bin/python3 /opt/cf-to-nios-sync/cf_to_nios_sync.py
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true

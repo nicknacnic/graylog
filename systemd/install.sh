@@ -219,6 +219,53 @@ EOF
 
 install_ha_log_poller
 
+# Cloudflare → NIOS darknetian.com sync (additive). Pulls CF zone
+# records and writes anything NIOS doesn't already have. Defaults to
+# dry-run; flip SYNC_DRY_RUN=0 in the env file to enable writes.
+install_cf_to_nios_sync() {
+  local user=cf-to-nios-sync
+  local src=tools/cf_to_nios_sync.py
+
+  if [[ ! -f "$src" ]]; then
+    echo "skip cf-to-nios-sync (no $src in repo)"
+    return
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -o root -g root -m 0755 /opt/cf-to-nios-sync
+  install -m 0755 "$src" /opt/cf-to-nios-sync/
+  install -d -o "$user" -g "$user" -m 0750 /var/lib/cf-to-nios-sync
+  install -d -o root -g "$user" -m 0750 /etc/cf-to-nios-sync
+  if [[ ! -f /etc/cf-to-nios-sync/env ]]; then
+    cat > /etc/cf-to-nios-sync/env <<'EOF'
+# Cloudflare API token with Zone Read on darknetian.com.
+CF_API_TOKEN=
+# NIOS grid master credentials.
+NIOS_HOST=gm.darknetian.com
+NIOS_USER=admin
+NIOS_PASS=
+NIOS_WAPI_VER=v2.13
+NIOS_VIEW=default
+# Cloudflare zone to mirror.
+CF_ZONE=darknetian.com
+# Start in dry-run. Flip to 0 to enable writes.
+SYNC_DRY_RUN=1
+# Types to sync. NIOS WAPI v2.13 doesn't have native SVCB/TLSA, those
+# stay CF-only.
+SYNC_TYPES=A,AAAA,CNAME,MX,TXT
+GELF_URL=http://127.0.0.1:12202/gelf
+EOF
+    chmod 0640 /etc/cf-to-nios-sync/env
+    chown root:"$user" /etc/cf-to-nios-sync/env
+    echo "NOTE: edit /etc/cf-to-nios-sync/env to add CF_API_TOKEN + NIOS_PASS"
+  fi
+  install -m 0644 systemd/cf-to-nios-sync.service /etc/systemd/system/
+  install -m 0644 systemd/cf-to-nios-sync.timer   /etc/systemd/system/
+}
+
+install_cf_to_nios_sync
+
 # Auto-rotate watchdog: watches Graylog's indexer-failures count and
 # rotates the offending index set when it spikes. Same single-unit
 # shape as cf-poller.
@@ -268,6 +315,7 @@ systemctl enable --now \
   csp-poller.timer \
   mcp-poller.timer \
   ha-log-poller.timer \
+  cf-to-nios-sync.timer \
   graylog-auto-rotate.timer
 
 echo "installed. Status:"
@@ -278,4 +326,5 @@ systemctl --no-pager status \
   csp-poller.timer \
   mcp-poller.timer \
   ha-log-poller.timer \
+  cf-to-nios-sync.timer \
   graylog-auto-rotate.timer || true
