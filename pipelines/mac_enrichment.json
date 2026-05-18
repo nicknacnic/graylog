@@ -8,7 +8,8 @@
         "match": "EITHER",
         "rules": [
           "mac normalize client_mac from cp_new_client_mac",
-          "mac normalize client_mac from aruba_client_mac"
+          "mac normalize client_mac from aruba_client_mac",
+          "mac normalize client_mac from dns_client_ip"
         ]
       },
       {
@@ -32,9 +33,14 @@
       "source": "rule \"mac normalize client_mac from aruba_client_mac\"\nwhen\n  has_field(\"aruba_client_mac\") &&\n  !has_field(\"client_mac\")\nthen\n  set_field(\"client_mac\", to_string($message.aruba_client_mac));\nend"
     },
     {
+      "title": "mac normalize client_mac from dns_client_ip",
+      "description": "dnstap events carry dns_client_ip but no MAC. Look up the MAC via the infoblox-nios-ip-to-mac table (NIOS host ipv4addrs + fixedaddress) and set client_mac so the downstream `mac enrich client_mac` rule resolves the DHCP hostname. Keying off dns_client_ip (not the Enrichment-pipeline-derived client_ip) so this rule doesn't depend on Enrichment having run first — Graylog runs multiple stream-connected pipelines in parallel, no ordering guarantee. Lookup table's default_single_value is null, so to_string returns empty when there's no NIOS record; mac enrich filters those out.",
+      "source": "rule \"mac normalize client_mac from dns_client_ip\"\nwhen\n  has_field(\"dns_client_ip\") &&\n  !has_field(\"client_mac\")\nthen\n  let ip = to_string($message.dns_client_ip);\n  let mac = to_string(lookup_value(\"infoblox-nios-ip-to-mac\", ip));\n  set_field(\"client_mac\", mac);\nend"
+    },
+    {
       "title": "mac enrich client_mac",
-      "description": "Resolve client_mac to its DHCP-assigned hostname via the infoblox-nios-mac lookup table (CSV synced hourly from NIOS fixedaddrs+leases by /usr/local/sbin/nios_mac_to_graylog_csv.py).",
-      "source": "rule \"mac enrich client_mac\"\nwhen\n  has_field(\"client_mac\")\nthen\n  let mac = lowercase(to_string($message.client_mac));\n  let host = lookup_value(\"infoblox-nios-mac\", mac);\n  set_field(\"client_hostname\", to_string(host));\nend"
+      "description": "Resolve client_mac to its DHCP-assigned hostname via the infoblox-nios-mac lookup table (CSV synced hourly from NIOS fixedaddrs+leases by /usr/local/sbin/nios_mac_to_graylog_csv.py). Skip when client_mac is empty (set by the IP normalizer for IPs NIOS doesn't know).",
+      "source": "rule \"mac enrich client_mac\"\nwhen\n  has_field(\"client_mac\") &&\n  to_string($message.client_mac) != \"\"\nthen\n  let mac = lowercase(to_string($message.client_mac));\n  let host = lookup_value(\"infoblox-nios-mac\", mac);\n  set_field(\"client_hostname\", to_string(host));\nend"
     }
   ]
 }

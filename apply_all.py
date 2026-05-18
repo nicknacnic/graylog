@@ -82,6 +82,8 @@ STEPS = [
     # ── 3. Lookups ─────────────────────────────────────────────────────────
     step("lookups", "MAC → DHCP hostname adapter + cache + table",
          ["python3", "lookups/mac_to_hostname.py"]),
+    step("lookups", "IP → MAC adapter + cache + table (NIOS host + fixedaddress)",
+         ["python3", "lookups/ip_to_mac.py"]),
 
     # ── 4. Pipelines + rules ───────────────────────────────────────────────
     step("pipelines", "Cradlepoint extraction rules + pipeline",
