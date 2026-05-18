@@ -325,13 +325,11 @@ def page_wan_perf() -> list[dict]:
             "row_field": "cp_dns_resolver", "row_limit": 10,
             "series": [
                 {"config": {"name": "avg ms"}, "function": "avg(cp_dns_query_ms)"},
-                {"config": {"name": "p95 ms"}, "function": "percentile(cp_dns_query_ms,95)"},
                 {"config": {"name": "max ms"}, "function": "max(cp_dns_query_ms)"},
                 {"config": {"name": "samples"}, "function": "count()"},
             ],
             "pivot_series": [
                 {"type": "avg", "id": "avg(cp_dns_query_ms)", "field": "cp_dns_query_ms"},
-                {"type": "percentile", "id": "percentile(cp_dns_query_ms,95)", "field": "cp_dns_query_ms", "percentile": "95"},
                 {"type": "max", "id": "max(cp_dns_query_ms)", "field": "cp_dns_query_ms"},
                 {"type": "count", "id": "count()"},
             ],
@@ -363,7 +361,7 @@ def page_wan_perf() -> list[dict]:
             "kind": "agg", "viz": "numeric",
             "query": "cp_event_type:wan_ip", "timerange": MONTH,
             "series": [{"config": {"name": "ips"}, "function": "cardinality(cp_wan_external_ip)"}],
-            "pivot_series": [{"type": "cardinality", "id": "cardinality(cp_wan_external_ip)", "field": "cp_wan_external_ip"}],
+            "pivot_series": [{"type": "card", "id": "cardinality(cp_wan_external_ip)", "field": "cp_wan_external_ip"}],
             "pos": {"col": 5, "row": 28, "width": 4, "height": 2},
         },
         {
@@ -372,12 +370,10 @@ def page_wan_perf() -> list[dict]:
             "query": "cp_event_type:wan_ip", "timerange": MONTH,
             "row_field": "cp_wan_external_ip", "row_limit": 25,
             "series": [
-                {"config": {"name": "first seen"}, "function": "earliest(timestamp)"},
                 {"config": {"name": "last seen"}, "function": "latest(timestamp)"},
                 {"config": {"name": "samples"}, "function": "count()"},
             ],
             "pivot_series": [
-                {"type": "earliest", "id": "earliest(timestamp)", "field": "timestamp"},
                 {"type": "latest", "id": "latest(timestamp)", "field": "timestamp"},
                 {"type": "count", "id": "count()"},
             ],
