@@ -1,13 +1,20 @@
 {
   "pipeline": {
     "title": "UDDI (cdc.darknetian.com)",
-    "description": "Normalize UDDI CEF events into the same dns_* / rcode / qname / qtype / dns_is_* shape the NIOS pipelines emit, so the Infoblox dashboard's pages (DNS / NXDOMAINs / SERVFAILs / Ops) work across both NIOS and UDDI sources.",
+    "description": "Normalize UDDI CEF events into the same dns_* / rcode / qname / qtype / dns_is_* shape the NIOS pipelines emit, then trim the CEF cruft fields that nothing queries so the index doesn't blow past OpenSearch's 1000-field cap on rotation.",
     "stages": [
       {
         "stage": 0,
         "match": "EITHER",
         "rules": [
           "uddi_normalize_dns_fields"
+        ]
+      },
+      {
+        "stage": 1,
+        "match": "EITHER",
+        "rules": [
+          "uddi_trim_unused_fields"
         ]
       }
     ]
@@ -17,6 +24,11 @@
       "title": "uddi_normalize_dns_fields",
       "description": "UDDI CEF → normalized DNS fields. The Graylog CEF input plugin already parses the Infoblox CEF key=value pairs into top-level GELF fields (InfobloxDNSRCode, destinationDnsDomain, InfobloxDNSQType, deviceAddress, etc.). This rule just aliases them to the dashboard's expected field names and computes the dns_is_* booleans, matching the shape the NIOS pipelines produce.",
       "source": "rule \"uddi_normalize_dns_fields\"\nwhen\n  has_field(\"event_class_id\") && has_field(\"InfobloxDNSRCode\")\nthen\n  let rc = to_string($message.InfobloxDNSRCode);\n  set_field(\"dns_event_type\", \"response\");\n  set_field(\"rcode\", rc);\n  set_field(\"qname\", to_string($message.destinationDnsDomain));\n  set_field(\"qtype\", to_string($message.InfobloxDNSQType));\n  set_field(\"dns_is_nxdomain\", rc == \"NXDOMAIN\");\n  set_field(\"dns_is_servfail\", rc == \"SERVFAIL\");\n  set_field(\"dns_is_error\",    rc != \"NOERROR\" && rc != \"\");\nend"
+    },
+    {
+      "title": "uddi_trim_unused_fields",
+      "description": "Drop CEF cruft that no dashboard widget queries. UDDI events arrive with 50+ fields (CEF spec is wide); cumulative cardinality across multiple event types eats the index's 1000-field cap inside ~1 rotation. Keep allowlist: event_class_id, client_*, qname/qtype/qclass/rcode, dns_event_type, dns_is_*, sender_*, source, severity, level, message, name, gl2_*, streams, timestamp, plus the raw InfobloxDNSRCode/QType the normalize rule reads. Runs after stage 0 so we don't drop destinationDnsDomain before it's aliased to qname.",
+      "source": "rule \"uddi_trim_unused_fields\"\nwhen\n  has_field(\"event_class_id\")\nthen\n  // CEF answer/auth/additional counts — never queried\n  remove_field(\"InfobloxAnCount\");\n  remove_field(\"InfobloxArCount\");\n  remove_field(\"InfobloxNsCount\");\n  // CSP B1 metadata — labels the customer/network/region, useful in CSP\n  // not here\n  remove_field(\"InfobloxB1ConnectionType\");\n  remove_field(\"InfobloxB1DHCPFingerprint\");\n  remove_field(\"InfobloxB1DNSTags\");\n  remove_field(\"InfobloxB1Network\");\n  remove_field(\"InfobloxB1OPHIPAddress\");\n  remove_field(\"InfobloxB1OPHName\");\n  remove_field(\"InfobloxB1Region\");\n  remove_field(\"InfobloxB1SrcOSVersion\");\n  // DNS flags/qclass — redundant with rcode\n  remove_field(\"InfobloxDNSQFlags\");\n  remove_field(\"InfobloxDNSQClass\");\n  // Transport / app metadata — UDP/TCP only, low signal\n  remove_field(\"applicationProtocol\");\n  remove_field(\"transportProtocol\");\n  remove_field(\"application_name\");\n  // Device metadata — constant per source (Infoblox NIOS-X strings)\n  remove_field(\"deviceHostName\");\n  remove_field(\"device_vendor\");\n  remove_field(\"device_product\");\n  remove_field(\"device_version\");\n  remove_field(\"deviceAddress\");\n  // Redundant source-side IP/port (we use sender_ip/client_ip)\n  remove_field(\"sourceMacAddress\");\n  remove_field(\"sourceAddress\");\n  remove_field(\"sourcePort\");\n  // Raw qname — already aliased to qname in stage 0\n  remove_field(\"destinationDnsDomain\");\n  // event_* internals from CEF — high cardinality (event_uid), low value\n  remove_field(\"event_log_name\");\n  remove_field(\"event_observer_hostname\");\n  remove_field(\"event_observer_id\");\n  remove_field(\"event_received_time\");\n  remove_field(\"event_repeat_count\");\n  remove_field(\"event_source_product\");\n  remove_field(\"event_start\");\n  remove_field(\"event_uid\");\n  remove_field(\"event_duration\");\n  // destination_* — UDDI ships these on DHCP/firewall event types but\n  // no widget consumes them; cumulative they're a chunk of the field\n  // explosion\n  remove_field(\"destination_bytes_sent\");\n  remove_field(\"destination_packets_sent\");\n  remove_field(\"destination_zone\");\n  remove_field(\"destination_port\");\n  remove_field(\"destination_location_name\");\n  remove_field(\"destination_nat_ip\");\n  remove_field(\"destination_nat_port\");\n  remove_field(\"destination_nat_reserved_ip\");\n  remove_field(\"destination_reserved_ip\");\n  remove_field(\"destination_ip\");\n  remove_field(\"destination_fqdn\");\nend"
     }
   ]
 }
