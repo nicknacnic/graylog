@@ -1,0 +1,11 @@
+[Unit]
+Description=Run WAN performance probe every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+AccuracySec=30s
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

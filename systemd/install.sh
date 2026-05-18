@@ -219,6 +219,52 @@ EOF
 
 install_ha_log_poller
 
+# WAN performance probe — Ookla speedtest + canary pings + DNS timing
+# + external-IP probe. Emits GELF with source=e300.darknetian.com so
+# events land in the existing Cradlepoint stream and surface on the
+# Cradlepoint dashboard's WAN Perf page.
+install_wan_perf_poller() {
+  local user=wan-perf-poller
+  local src=pollers/wan_perf_poller.py
+
+  if [[ ! -f "$src" ]]; then
+    echo "skip wan-perf-poller (no $src in repo)"
+    return
+  fi
+  if ! command -v speedtest >/dev/null 2>&1; then
+    echo "NOTE: Ookla 'speedtest' binary not on PATH. Install with:"
+    echo "  curl -sSL https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz -o /tmp/ookla.tgz"
+    echo "  tar xzf /tmp/ookla.tgz -C /tmp && install -m 0755 /tmp/speedtest /usr/local/bin/speedtest"
+    echo "  (poller still runs without it; speedtest events will be skipped)"
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -o root -g root -m 0755 /opt/wan-perf-poller
+  install -m 0755 "$src" /opt/wan-perf-poller/
+  install -d -o "$user" -g "$user" -m 0750 /var/lib/wan-perf-poller
+  install -d -o root -g "$user" -m 0750 /etc/wan-perf-poller
+  if [[ ! -f /etc/wan-perf-poller/env ]]; then
+    cat > /etc/wan-perf-poller/env <<'EOF'
+GELF_URL=http://127.0.0.1:12202/gelf
+# source field on emitted events — must match the Cradlepoint stream's
+# source rule so the WAN Perf page picks these up.
+WAN_HOST_LABEL=e300.darknetian.com
+WAN_CANARIES=1.1.1.1,8.8.8.8,threatdefense.infoblox.com,www.darknetian.com
+WAN_DNS_RESOLVERS=1.1.1.1,8.8.8.8,10.10.0.253,threatdefense.infoblox.com
+WAN_DNS_QUERY=cloudflare.com
+WAN_PING_COUNT=10
+# SKIP_SPEEDTEST=1 to disable Ookla runs (e.g. on metered links)
+EOF
+    chmod 0640 /etc/wan-perf-poller/env
+    chown root:"$user" /etc/wan-perf-poller/env
+  fi
+  install -m 0644 systemd/wan-perf-poller.service /etc/systemd/system/
+  install -m 0644 systemd/wan-perf-poller.timer   /etc/systemd/system/
+}
+
+install_wan_perf_poller
+
 # Cloudflare → NIOS darknetian.com sync (additive). Pulls CF zone
 # records and writes anything NIOS doesn't already have. Defaults to
 # dry-run; flip SYNC_DRY_RUN=0 in the env file to enable writes.
@@ -315,6 +361,7 @@ systemctl enable --now \
   csp-poller.timer \
   mcp-poller.timer \
   ha-log-poller.timer \
+  wan-perf-poller.timer \
   cf-to-nios-sync.timer \
   graylog-auto-rotate.timer
 
@@ -326,5 +373,6 @@ systemctl --no-pager status \
   csp-poller.timer \
   mcp-poller.timer \
   ha-log-poller.timer \
+  wan-perf-poller.timer \
   cf-to-nios-sync.timer \
   graylog-auto-rotate.timer || true

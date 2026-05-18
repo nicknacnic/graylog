@@ -1,0 +1,25 @@
+[Unit]
+Description=WAN performance probe (Ookla speedtest + canary pings + DNS timing) → Graylog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wan-perf-poller
+Group=wan-perf-poller
+EnvironmentFile=/etc/wan-perf-poller/env
+ExecStart=/usr/bin/python3 /opt/wan-perf-poller/wan_perf_poller.py
+TimeoutStartSec=180
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# ping needs cap_net_raw on most distros; iputils-ping is suid-root by
+# default on Ubuntu so this works without granting extra caps.
