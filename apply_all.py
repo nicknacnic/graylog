@@ -127,8 +127,6 @@ STEPS = [
          ["python3", "dashboards/synology.py"]),
     step("dashboards", "Home Assistant — logs",
          ["python3", "dashboards/ha_logs.py"]),
-    step("dashboards", "NIOS dnstap",
-         ["python3", "dashboards/nios_dnstap.py"]),
 ]
 
 

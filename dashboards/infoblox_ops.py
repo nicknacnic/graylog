@@ -50,6 +50,16 @@ TR_STREAM = "697e67bdeeb15b769f423c70"
 NIOS_DNS_STREAM  = "6a07586aa72ecf3a3bf3096b"
 NIOS_DHCP_STREAM = "6a07586ba72ecf3a3bf3097c"
 
+# NIOS dnstap — per-query GELF via dnscollector + bridge (see
+# pollers/dnstap_collector_config.yml). Carries the same query/response
+# detail that the older NIOS syslog DNS log used to provide, but
+# structured and per-event. Fields: dnstap_operation
+# (CLIENT_QUERY/CLIENT_RESPONSE/FORWARDER_QUERY/FORWARDER_RESPONSE),
+# dnstap_identity (grid member), dns_qname, dns_qtype, dns_rcode,
+# dns_client_ip, dns_server_ip, dnstap_latency_ms.
+DNSTAP_STREAM = "6a0b235712e68f7f742811ec"
+AUTH_ZONE = "darknetian.com"
+
 # Infoblox CSP (CubeJS / IQ-computed metrics). Filled lazily at build()
 # time via lookup-by-title so this constant doesn't need to be edited
 # after the indexing/csp.py step has created the stream.
@@ -378,124 +388,134 @@ def page_reporting():
 
 
 def page_auth_dns():
-    """Auth-DNS only — queries whose qname is inside the darknetian.com
-    zone NIOS is authoritative for. Scoped to the NIOS DNS member-syslog
-    stream and filtered by `nios_dns_role:auth`, which the
-    pipelines/nios_dns_role.json rule sets in stage 1 after the per-host
-    NIOS pipelines extract qname.
+    """Auth-DNS slice of the dnstap stream — every query a grid member
+    served from its own auth zone.
 
-    Note: the NIOS DNS member stream also carries forwarded queries
-    (everything NIOS sent onwards to NIOS-X). The 'Recursive DNS' page
-    is the right place to look at those + the NIOS-X-side response feed.
-    A 'forwards (context)' tile here gives you the relative volume."""
-    AUTH = "nios_dns_role:auth"
+    Source: NIOS dnstap (replaces the older NIOS member syslog DNS log).
+    Field semantics:
+      dnstap_operation:CLIENT_QUERY    — a stub asked NIOS something
+      dnstap_operation:CLIENT_RESPONSE — what NIOS answered (has rcode +
+                                          dnstap_latency_ms)
+      dnstap_identity                  — which grid member (ns1, ddi, …)
+      dns_qname / dns_qtype / dns_rcode / dns_client_ip
+    `Auth` here means qname inside the AUTH_ZONE NIOS is authoritative
+    for. Everything else NIOS handles is on the Recursive DNS page."""
+    CQ_AUTH = (f'dnstap_operation:CLIENT_QUERY AND '
+               f'(dns_qname:{AUTH_ZONE} OR dns_qname:*.{AUTH_ZONE})')
+    CR_AUTH = (f'dnstap_operation:CLIENT_RESPONSE AND '
+               f'(dns_qname:{AUTH_ZONE} OR dns_qname:*.{AUTH_ZONE})')
     return [
         # Row 1: auth-specific headline numerics
-        numeric("Auth queries (24h)", AUTH, "count()", timerange=DAY,
+        numeric("Auth queries (24h)", CQ_AUTH, "count()", timerange=DAY,
                 pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="auth"),
-        numeric("Forwards to NIOS-X (24h)", "nios_dns_role:forward",
-                "count()", timerange=DAY,
+        numeric("Forwards to NIOS-X (24h)",
+                "dnstap_operation:FORWARDER_QUERY", "count()", timerange=DAY,
                 pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="fwd"),
         numeric("Auth NXDOMAIN (24h)",
-                f"{AUTH} AND (dns_is_nxdomain:true OR rcode:NXDOMAIN)",
+                f"{CR_AUTH} AND dns_rcode:NXDOMAIN",
                 "count()", timerange=DAY,
                 pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="nx"),
         numeric("Distinct auth qnames (24h)",
-                f"{AUTH} AND _exists_:qname",
-                "cardinality(qname)", timerange=DAY,
+                CQ_AUTH, "cardinality(dns_qname)", timerange=DAY,
                 pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="qnames"),
-        # Row 2: auth-vs-forward rate over 24h (sanity check on traffic mix)
-        line_ts("Auth vs forward rate (24h)",
-                "_exists_:nios_dns_role",
+        # Row 2: auth-vs-forward operation mix over 24h. CLIENT_QUERY is
+        # stub→NIOS; FORWARDER_QUERY is NIOS→NIOS-X. Ratio between them
+        # tells you how much of the grid's load is auth-answerable vs
+        # forwarded.
+        line_ts("CLIENT vs FORWARDER queries (24h)",
+                "dnstap_operation:(CLIENT_QUERY OR FORWARDER_QUERY)",
                 series=[("count", "count()")],
-                column_field="nios_dns_role",
+                column_field="dnstap_operation",
                 pos={"col": 1, "row": 3, "width": 12, "height": 4}),
-        # Row 3: per-server auth split (.57 vs .253) + top auth clients
-        line_ts("Auth queries by server (24h)",
-                AUTH, series=[("count", "count()")],
-                column_field="source",
+        # Row 3: per-server auth split + top auth clients
+        line_ts("Auth queries by grid member (24h)",
+                CQ_AUTH, series=[("count", "count()")],
+                column_field="dnstap_identity",
                 pos={"col": 1, "row": 7, "width": 6, "height": 5}),
         table("Top auth clients (24h)",
-              f"{AUTH} AND _exists_:client_ip",
-              row_field="client_ip", row_limit=15,
+              CQ_AUTH,
+              row_field="dns_client_ip", row_limit=15,
               series=[
                   ("auth queries", "count()"),
                   ("name",         "latest(client_fqdn)"),
                   ("hostname",     "latest(client_hostname)"),
-                  ("qnames",       "cardinality(qname)"),
+                  ("qnames",       "cardinality(dns_qname)"),
               ],
               pos={"col": 7, "row": 7, "width": 6, "height": 5}),
-        # Row 4: top auth qnames (real auth answers from the zone) +
-        # search-domain-appended noise is visible here too — qnames like
-        # 'grpc.csp.infoblox.com.darknetian.com' come from clients
-        # without proper FQDN qualification and tend to NXDOMAIN.
+        # Row 4: top auth qnames. Search-domain-appended noise like
+        # 'grpc.csp.infoblox.com.darknetian.com' (mis-qualified stubs)
+        # tends to NXDOMAIN — visible here.
         table("Top auth qnames (24h)",
-              f"{AUTH} AND _exists_:qname AND NOT qname:\"\"",
-              row_field="qname", row_limit=20,
+              CR_AUTH,
+              row_field="dns_qname", row_limit=20,
               series=[
                   ("queries",  "count()"),
-                  ("clients",  "cardinality(client_ip)"),
-                  ("last rc",  "latest(rcode)"),
+                  ("clients",  "cardinality(dns_client_ip)"),
+                  ("last rc",  "latest(dns_rcode)"),
               ],
               pos={"col": 1, "row": 12, "width": 12, "height": 5}),
         # Row 5: auth rcode + qtype mix
         pie("Auth RCODE mix (24h)",
-            f"{AUTH} AND _exists_:rcode",
-            field="rcode",
+            CR_AUTH,
+            field="dns_rcode",
             pos={"col": 1, "row": 17, "width": 6, "height": 4}),
         pie("Auth query type mix (24h)",
-            f"{AUTH} AND _exists_:qtype",
-            field="qtype",
+            CQ_AUTH,
+            field="dns_qtype",
             pos={"col": 7, "row": 17, "width": 6, "height": 4}),
     ]
 
 
 def page_recursive_dns():
-    """Recursive DNS: NIOS-X is the actual recursive resolver. Two
-    paths feed it — NIOS member forwarders (.57, .253) when an internal
-    client asks NIOS for a non-auth zone, AND direct queries from
-    endpoints that have NIOS-X configured as their resolver (DHCP
-    option 6 distributes it). So the total recursive volume on NIOS-X
-    is typically larger than the NIOS forwarding volume.
+    """Recursive DNS spans two complementary feeds:
 
-    Spans two streams (NIOS DNS member + UDDI). Field semantics:
-      * On UDDI events: client_ip is the actual querier (NIOS member
-        if forwarded, end-host if direct). event_class_id='DNS Response'
-        is the canonical 'one recursive answer' marker.
-      * On NIOS DNS member events with nios_dns_role=forward, the
-        NIOS member is the one logging the forward; client_ip is the
-        end-host that asked NIOS in the first place."""
-    FWD = "nios_dns_role:forward"
+      NIOS side — `dnstap_operation:FORWARDER_QUERY` and
+                 `FORWARDER_RESPONSE` on the dnstap stream. Captures
+                 exactly what every grid member forwards upstream to
+                 NIOS-X, with latency.
+
+      NIOS-X side — `event_class_id:"DNS Response"` on the UDDI stream.
+                   The canonical 'one recursive answer' marker; carries
+                   the actual recursive result (rcode, qname) and the
+                   querier IP.
+
+    Together they show: what NIOS asked NIOS-X for, what NIOS-X actually
+    served, and how much of NIOS-X's load came from non-NIOS clients
+    (DHCP option 6 distributes NIOS-X as the resolver to many endpoints
+    directly, so the NIOS-X-side volume is typically larger than the
+    NIOS-side forwarding volume)."""
+    FQ = "dnstap_operation:FORWARDER_QUERY"
+    FR = "dnstap_operation:FORWARDER_RESPONSE"
     REC = 'event_class_id:"DNS Response"'
     REC_VIA_NIOS   = f'{REC} AND (client_ip:"10.10.0.57" OR client_ip:"10.10.0.253")'
     REC_FROM_DIRECT = f'{REC} AND NOT (client_ip:"10.10.0.57" OR client_ip:"10.10.0.253")'
     return [
-        # Row 1: NIOS-X total, broken down by source path
+        # Row 1: headline numerics — NIOS-X side + NIOS forwarder side
         numeric("NIOS-X recursive — all (24h)", REC, "count()", timerange=DAY,
                 pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="all"),
         numeric("Via NIOS forwarder (24h)", REC_VIA_NIOS, "count()", timerange=DAY,
                 pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="via NIOS"),
         numeric("Direct to NIOS-X (24h)", REC_FROM_DIRECT, "count()", timerange=DAY,
                 pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="direct"),
-        numeric("NIOS forwards out (24h)", FWD, "count()", timerange=DAY,
+        numeric("NIOS forwards out (24h)", FQ, "count()", timerange=DAY,
                 pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="fwd-out"),
-        # Row 2: rate over 24h, grouped by client_ip so you see who's
-        # driving NIOS-X demand (NIOS forwarders vs direct endpoints)
+        # Row 2: NIOS-X recursive rate by client (UDDI side — same widget
+        # the user had; UDDI stream is in the page's streams list)
         line_ts("NIOS-X recursive rate by client (24h)",
                 REC, series=[("count", "count()")],
                 column_field="client_ip",
                 pos={"col": 1, "row": 3, "width": 12, "height": 4}),
-        # Row 3: NIOS-side — what NIOS is forwarding (its demand profile)
-        table("Top forwarded qnames (24h, NIOS members forwarding to NIOS-X)",
-              f"{FWD} AND _exists_:qname AND NOT qname:\"\"",
-              row_field="qname", row_limit=20,
+        # Row 3: NIOS-side forwarding profile (dnstap FORWARDER_QUERY)
+        table("Top forwarded qnames (24h, NIOS members → NIOS-X)",
+              FQ, row_field="dns_qname", row_limit=20,
               series=[
-                  ("forwards",      "count()"),
-                  ("client (NIOS)", "latest(source)"),
-                  ("via clients",   "cardinality(client_ip)"),
+                  ("forwards",        "count()"),
+                  ("via member",      "latest(dnstap_identity)"),
+                  ("upstream",        "latest(dns_server_ip)"),
+                  ("avg up-latency",  "avg(dnstap_latency_ms)"),
               ],
               pos={"col": 1, "row": 7, "width": 12, "height": 5}),
-        # Row 4: NIOS-X-side — what was actually resolved
+        # Row 4: NIOS-X-side answers (UDDI)
         table("Top recursive answers (24h, on NIOS-X)",
               f"{REC} AND _exists_:qname",
               row_field="qname", row_limit=20,
@@ -505,7 +525,7 @@ def page_recursive_dns():
                   ("last rc",  "latest(rcode)"),
               ],
               pos={"col": 1, "row": 12, "width": 12, "height": 5}),
-        # Row 5: who's asking NIOS-X (NIOS members vs direct endpoints)
+        # Row 5: who's asking NIOS-X + rcode/qtype mix
         table("Top NIOS-X clients (24h)",
               f"{REC} AND _exists_:client_ip",
               row_field="client_ip", row_limit=10,
@@ -523,6 +543,11 @@ def page_recursive_dns():
             f"{REC} AND _exists_:qtype",
             field="qtype",
             pos={"col": 10, "row": 17, "width": 3, "height": 5}),
+        # Row 6: NIOS-side upstream latency over time (dnstap responses)
+        line_ts("NIOS→NIOS-X forwarder latency ms (24h)",
+                FR, series=[("avg ms", "avg(dnstap_latency_ms)")],
+                column_field="dns_server_ip",
+                pos={"col": 1, "row": 22, "width": 12, "height": 4}),
     ]
 
 
@@ -859,8 +884,8 @@ def build():
         ("Top talkers",     page_top_talkers,    DAY, None),
         ("DNS health",      page_health,         DAY, None),
         ("Anomalies",       page_anomalies,      DAY, None),
-        ("Auth DNS",        page_auth_dns,       DAY, [NIOS_DNS_STREAM]),
-        ("Recursive DNS",   page_recursive_dns,  DAY, [NIOS_DNS_STREAM, UDDI_STREAM]),
+        ("Auth DNS",        page_auth_dns,       DAY, [DNSTAP_STREAM]),
+        ("Recursive DNS",   page_recursive_dns,  DAY, [DNSTAP_STREAM, UDDI_STREAM]),
         ("DHCP",            page_dhcp,           DAY, [NIOS_DHCP_STREAM]),
         ("Network Insight", page_network_insight, DAY, [NI_STREAM]),
         ("Grid Admin",      page_grid_admin,     DAY, [GM_STREAM]),
