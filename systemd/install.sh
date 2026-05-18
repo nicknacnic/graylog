@@ -250,9 +250,12 @@ GELF_URL=http://127.0.0.1:12202/gelf
 # source field on emitted events — must match the Cradlepoint stream's
 # source rule so the WAN Perf page picks these up.
 WAN_HOST_LABEL=e300.darknetian.com
-WAN_CANARIES=1.1.1.1,8.8.8.8,threatdefense.infoblox.com,www.darknetian.com
-WAN_DNS_RESOLVERS=1.1.1.1,8.8.8.8,10.10.0.253,threatdefense.infoblox.com
-WAN_DNS_QUERY=cloudflare.com
+WAN_CANARIES=1.1.1.1,8.8.8.8,9.9.9.9,threatdefense.infoblox.com,ns1.darknetian.com,www.darknetian.com
+WAN_DNS_RESOLVERS=1.1.1.1,8.8.8.8,9.9.9.9,ns1.darknetian.com,threatdefense.infoblox.com
+# `{rand}` is replaced with 8 hex chars per cycle so resolvers can't
+# serve from cache. example.com is IANA-managed; random labels NX
+# cheaply.
+WAN_DNS_QUERY_TEMPLATE={rand}.example.com
 WAN_PING_COUNT=10
 # SKIP_SPEEDTEST=1 to disable Ookla runs (e.g. on metered links)
 EOF

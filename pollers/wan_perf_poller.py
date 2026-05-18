@@ -62,13 +62,19 @@ SOURCE = os.environ.get("WAN_HOST_LABEL", "e300.darknetian.com").strip()
 
 CANARIES = [c.strip() for c in os.environ.get(
     "WAN_CANARIES",
-    "1.1.1.1,8.8.8.8,threatdefense.infoblox.com,www.darknetian.com",
+    "1.1.1.1,8.8.8.8,9.9.9.9,threatdefense.infoblox.com,"
+    "ns1.darknetian.com,www.darknetian.com",
 ).split(",") if c.strip()]
 DNS_RESOLVERS = [r.strip() for r in os.environ.get(
     "WAN_DNS_RESOLVERS",
-    "1.1.1.1,8.8.8.8,10.10.0.253,threatdefense.infoblox.com",
+    "1.1.1.1,8.8.8.8,9.9.9.9,ns1.darknetian.com,threatdefense.infoblox.com",
 ).split(",") if r.strip()]
-DNS_QUERY = os.environ.get("WAN_DNS_QUERY", "cloudflare.com").strip()
+# Cache-busting query template — `{rand}` is substituted with an
+# 8-char hex string per cycle so every resolver has to do real work
+# instead of serving from cache. example.com is IANA-managed and
+# returns authoritative NXDOMAIN cheaply for random labels.
+DNS_QUERY_TEMPLATE = os.environ.get("WAN_DNS_QUERY_TEMPLATE",
+                                    "{rand}.example.com").strip()
 PING_COUNT = int(os.environ.get("WAN_PING_COUNT", "10"))
 SKIP_SPEEDTEST = os.environ.get("SKIP_SPEEDTEST", "0") == "1"
 
@@ -245,6 +251,8 @@ def _time_dns(resolver_ip: str, query: str) -> float | None:
 
 
 def run_dns_timing() -> None:
+    import secrets
+    query = DNS_QUERY_TEMPLATE.replace("{rand}", secrets.token_hex(4))
     for r in DNS_RESOLVERS:
         # Resolve hostname-style entries (threatdefense.infoblox.com, etc.)
         # once per cycle. If the resolver itself is a hostname and we
@@ -255,24 +263,24 @@ def run_dns_timing() -> None:
             print(f"  dns {r}: hostname resolution failed", file=sys.stderr)
             gelf(f"dns_timing {r}: hostname unresolvable", level=4,
                  cp_event_type="dns_timing",
-                 cp_dns_resolver=r, cp_dns_query_name=DNS_QUERY,
+                 cp_dns_resolver=r, cp_dns_query_name=query,
                  cp_dns_query_ms=2500.0)
             continue
-        ms = _time_dns(resolver_ip, DNS_QUERY)
+        ms = _time_dns(resolver_ip, query)
         common = {
             "cp_event_type": "dns_timing",
             "cp_dns_resolver": r,
             "cp_dns_resolver_ip": resolver_ip,
-            "cp_dns_query_name": DNS_QUERY,
+            "cp_dns_query_name": query,
         }
         if ms is None:
             gelf(f"dns_timing {r}: timeout/error", level=4,
                  **common, cp_dns_query_ms=2500.0)
-            print(f"  dns {r} ({resolver_ip}): timeout")
+            print(f"  dns {r} ({resolver_ip}) {query}: timeout")
             continue
-        gelf(f"dns_timing {r} {DNS_QUERY}: {ms}ms",
+        gelf(f"dns_timing {r} {query}: {ms}ms",
              **common, cp_dns_query_ms=ms)
-        print(f"  dns {r} ({resolver_ip}): {ms}ms")
+        print(f"  dns {r} ({resolver_ip}) {query}: {ms}ms")
 
 
 # ── WAN external IP probe ──────────────────────────────────────────────────
