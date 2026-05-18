@@ -180,7 +180,7 @@ def page_overview() -> list[dict]:
     ]
 
 
-# ── WAN perf page ─────────────────────────────────────────────────────────
+# ── WAN perf page (speedtest + external IP) ───────────────────────────────
 def page_wan_perf() -> list[dict]:
     return [
         # Row 1 — latest speedtest results (banner numerics)
@@ -272,7 +272,45 @@ def page_wan_perf() -> list[dict]:
             "pos": {"col": 7, "row": 12, "width": 6, "height": 4},
         },
 
-        # Row 5 — canary ping summary table + over-time
+        # Row 5 — external IP
+        {
+            "title": "WAN external IP (latest)",
+            "kind": "agg", "viz": "numeric",
+            "query": "cp_event_type:wan_ip", "timerange": DAY,
+            "series": [{"config": {"name": "ip"}, "function": "latest(cp_wan_external_ip)"}],
+            "pivot_series": [{"type": "latest", "id": "latest(cp_wan_external_ip)", "field": "cp_wan_external_ip"}],
+            "pos": {"col": 1, "row": 16, "width": 4, "height": 2},
+        },
+        {
+            "title": "WAN external IP changes (30d)",
+            "kind": "agg", "viz": "numeric",
+            "query": "cp_event_type:wan_ip", "timerange": MONTH,
+            "series": [{"config": {"name": "ips"}, "function": "cardinality(cp_wan_external_ip)"}],
+            "pivot_series": [{"type": "card", "id": "cardinality(cp_wan_external_ip)", "field": "cp_wan_external_ip"}],
+            "pos": {"col": 5, "row": 16, "width": 4, "height": 2},
+        },
+        {
+            "title": "Distinct external IPs seen (30d)",
+            "kind": "agg", "viz": "table",
+            "query": "cp_event_type:wan_ip", "timerange": MONTH,
+            "row_field": "cp_wan_external_ip", "row_limit": 25,
+            "series": [
+                {"config": {"name": "last seen"}, "function": "latest(timestamp)"},
+                {"config": {"name": "samples"}, "function": "count()"},
+            ],
+            "pivot_series": [
+                {"type": "latest", "id": "latest(timestamp)", "field": "timestamp"},
+                {"type": "count", "id": "count()"},
+            ],
+            "pos": {"col": 1, "row": 18, "width": 12, "height": 4},
+        },
+    ]
+
+
+# ── Canary page (ICMP pings + DNS resolver timing) ────────────────────────
+def page_canary() -> list[dict]:
+    return [
+        # Row 1 — canary ping summary table
         {
             "title": "Canary ping summary (7d)",
             "kind": "agg", "viz": "table",
@@ -292,8 +330,10 @@ def page_wan_perf() -> list[dict]:
                 {"type": "avg", "id": "avg(cp_canary_loss_pct)", "field": "cp_canary_loss_pct"},
                 {"type": "count", "id": "count()"},
             ],
-            "pos": {"col": 1, "row": 16, "width": 12, "height": 4},
+            "pos": {"col": 1, "row": 1, "width": 12, "height": 4},
         },
+
+        # Row 2 — RTT + loss over 7d, per target
         {
             "title": "Canary RTT ms over 7d, per target",
             "kind": "agg", "viz": "line",
@@ -303,7 +343,7 @@ def page_wan_perf() -> list[dict]:
             "series": [{"config": {"name": "avg RTT"}, "function": "avg(cp_canary_rtt_avg_ms)"}],
             "pivot_series": [{"type": "avg", "id": "avg(cp_canary_rtt_avg_ms)", "field": "cp_canary_rtt_avg_ms"}],
             "column_limit": 10,
-            "pos": {"col": 1, "row": 20, "width": 6, "height": 4},
+            "pos": {"col": 1, "row": 5, "width": 6, "height": 4},
         },
         {
             "title": "Canary packet loss % over 7d, per target",
@@ -314,10 +354,10 @@ def page_wan_perf() -> list[dict]:
             "series": [{"config": {"name": "loss %"}, "function": "avg(cp_canary_loss_pct)"}],
             "pivot_series": [{"type": "avg", "id": "avg(cp_canary_loss_pct)", "field": "cp_canary_loss_pct"}],
             "column_limit": 10,
-            "pos": {"col": 7, "row": 20, "width": 6, "height": 4},
+            "pos": {"col": 7, "row": 5, "width": 6, "height": 4},
         },
 
-        # Row 6 — DNS resolver timing
+        # Row 3 — DNS resolver timing
         {
             "title": "DNS resolver timing summary (7d)",
             "kind": "agg", "viz": "table",
@@ -333,7 +373,7 @@ def page_wan_perf() -> list[dict]:
                 {"type": "max", "id": "max(cp_dns_query_ms)", "field": "cp_dns_query_ms"},
                 {"type": "count", "id": "count()"},
             ],
-            "pos": {"col": 1, "row": 24, "width": 6, "height": 4},
+            "pos": {"col": 1, "row": 9, "width": 6, "height": 4},
         },
         {
             "title": "DNS resolver latency over 7d, per resolver",
@@ -344,40 +384,16 @@ def page_wan_perf() -> list[dict]:
             "series": [{"config": {"name": "avg ms"}, "function": "avg(cp_dns_query_ms)"}],
             "pivot_series": [{"type": "avg", "id": "avg(cp_dns_query_ms)", "field": "cp_dns_query_ms"}],
             "column_limit": 10,
-            "pos": {"col": 7, "row": 24, "width": 6, "height": 4},
+            "pos": {"col": 7, "row": 9, "width": 6, "height": 4},
         },
 
-        # Row 7 — external IP history
+        # Row 4 — recent canary + DNS events (newest first)
         {
-            "title": "WAN external IP (latest)",
-            "kind": "agg", "viz": "numeric",
-            "query": "cp_event_type:wan_ip", "timerange": DAY,
-            "series": [{"config": {"name": "ip"}, "function": "latest(cp_wan_external_ip)"}],
-            "pivot_series": [{"type": "latest", "id": "latest(cp_wan_external_ip)", "field": "cp_wan_external_ip"}],
-            "pos": {"col": 1, "row": 28, "width": 4, "height": 2},
-        },
-        {
-            "title": "WAN external IP changes (30d)",
-            "kind": "agg", "viz": "numeric",
-            "query": "cp_event_type:wan_ip", "timerange": MONTH,
-            "series": [{"config": {"name": "ips"}, "function": "cardinality(cp_wan_external_ip)"}],
-            "pivot_series": [{"type": "card", "id": "cardinality(cp_wan_external_ip)", "field": "cp_wan_external_ip"}],
-            "pos": {"col": 5, "row": 28, "width": 4, "height": 2},
-        },
-        {
-            "title": "Distinct external IPs seen (30d)",
-            "kind": "agg", "viz": "table",
-            "query": "cp_event_type:wan_ip", "timerange": MONTH,
-            "row_field": "cp_wan_external_ip", "row_limit": 25,
-            "series": [
-                {"config": {"name": "last seen"}, "function": "latest(timestamp)"},
-                {"config": {"name": "samples"}, "function": "count()"},
-            ],
-            "pivot_series": [
-                {"type": "latest", "id": "latest(timestamp)", "field": "timestamp"},
-                {"type": "count", "id": "count()"},
-            ],
-            "pos": {"col": 1, "row": 30, "width": 12, "height": 4},
+            "title": "Recent canary + DNS events (24h)",
+            "kind": "messages",
+            "query": "cp_event_type:(ping_canary OR dns_timing)",
+            "timerange": DAY,
+            "pos": {"col": 1, "row": 13, "width": 12, "height": 6},
         },
     ]
 
@@ -386,6 +402,7 @@ def build():
     page_defs = [
         ("Overview", page_overview, DAY),
         ("WAN Perf", page_wan_perf,  WEEK),
+        ("Canary",   page_canary,    WEEK),
     ]
     pages_for_search: list[dict] = []
     pages_for_view: list[dict] = []
