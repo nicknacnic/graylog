@@ -224,7 +224,15 @@ STORY: list[StoryEvent] = [
 
 
 # ─── Shape for baseline noise ─────────────────────────────────────────────
-PEAK_DAYS_AGO = 7   # Story spike: 7 days back from now.
+PEAK_DAYS_AGO = 7   # Backfill story spike anchor: 7 days back from now.
+
+# Recurring spike days-of-month for the live cron. Set to multiple
+# DoM values to get multiple peaks per month — defaults to {12, 26}
+# so the dashboard's 30d window always shows ~2 peaks ~14 days apart.
+PEAK_DAYS_OF_MONTH = {
+    int(x) for x in os.environ.get("CTEM_SYNTHETIC_PEAK_DOM", "12,26").split(",")
+    if x.strip()
+}
 
 
 def baseline_count(t: datetime, days_ago: int) -> int:
@@ -296,18 +304,40 @@ def emit_one(tpl: T, when: datetime, suffix: str = "") -> bool:
 
 # ─── Modes ────────────────────────────────────────────────────────────────
 def run_live() -> None:
-    """Current-time, variable count, baseline-heavy. ~3-8 events/cycle."""
+    """Current-time emit, variable count. Recurring monthly peak: on
+    PEAK_DAY_OF_MONTH the cron amplifies into an attack-pool burst
+    during business hours so the 30d trendline always shows one
+    visible spike."""
     now = datetime.now(timezone.utc)
-    n = random.randint(3, 8)
-    print(f"== ctem-synthetic live n={n} ts={now.isoformat()} ==")
+    dom = now.day
+
+    is_peak_day = dom in PEAK_DAYS_OF_MONTH
+    is_peak_hour = is_peak_day and 14 <= now.hour < 22
+    is_shoulder = any(dom in (p - 1, p + 1) for p in PEAK_DAYS_OF_MONTH)
+
+    if is_peak_hour:
+        n = random.randint(12, 20)
+        attack_p = 0.75
+        label = "PEAK"
+    elif is_peak_day:
+        n = random.randint(6, 12)
+        attack_p = 0.50
+        label = "peak-day"
+    elif is_shoulder:
+        n = random.randint(5, 10)
+        attack_p = 0.30
+        label = "shoulder"
+    else:
+        n = random.randint(3, 8)
+        attack_p = 0.15
+        label = "baseline"
+
+    print(f"== ctem-synthetic live n={n} mode={label} ts={now.isoformat()} ==")
     ok = 0
-    for i in range(n):
-        # 15% chance of an attack-flavored noise event going forward, so
-        # the trendline has occasional bumps even outside the staged
-        # peak in history.
-        pool = ATTACK if random.random() < 0.15 else BASELINE
+    for _ in range(n):
+        pool = ATTACK if random.random() < attack_p else BASELINE
         tpl = random.choice(pool)
-        if emit_one(tpl, now + timedelta(seconds=random.randint(0, 60))):
+        if emit_one(tpl, now + timedelta(seconds=random.randint(0, 3590))):
             ok += 1
     print(f"  emitted={ok}/{n}")
 
