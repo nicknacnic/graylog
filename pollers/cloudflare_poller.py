@@ -244,6 +244,59 @@ def poll_http_requests(zone: dict, start: str, end: str) -> None:
         )
 
 
+def poll_http_by_host(zone: dict, start: str, end: str) -> None:
+    """5-minute HTTP request buckets broken out by hostname.
+
+    Same shape as poll_http_requests but adds clientRequestHTTPHost as
+    a dimension so the dashboard's Traffic page can split www vs ans
+    vs apex etc. Emits cf_event_type=requests_host_5m with
+    cf_request_host so the per-host events live alongside the
+    aggregate requests_5m events without interleaving on `cf_requests`
+    sums (queries on the page filter on the event_type).
+    """
+    q = """
+    query($zoneTag: String!, $start: Time!, $end: Time!) {
+      viewer {
+        zones(filter: {zoneTag: $zoneTag}) {
+          httpRequestsAdaptiveGroups(
+            limit: 200,
+            filter: {datetime_geq: $start, datetime_lt: $end},
+            orderBy: [count_DESC]
+          ) {
+            dimensions { datetime clientRequestHTTPHost }
+            count
+            sum {
+              visits
+              edgeRequestBytes
+              edgeResponseBytes
+            }
+          }
+        }
+      }
+    }
+    """
+    data = cf_graphql(q, {"zoneTag": zone["id"], "start": start, "end": end})
+    zones = ((data.get("viewer") or {}).get("zones")) or []
+    if not zones:
+        return
+    for g in (zones[0].get("httpRequestsAdaptiveGroups") or []):
+        dim = g.get("dimensions") or {}
+        s = g.get("sum") or {}
+        host = (dim.get("clientRequestHTTPHost") or "").lower() or "-"
+        gelf(
+            f"HTTP-HOST {zone['name']} {host} @ {dim.get('datetime')}: {g.get('count')} req",
+            host=f"cloudflare-{zone['name']}",
+            cf_event_type="requests_host_5m",
+            cf_zone_name=zone["name"],
+            cf_request_host=host,
+            cf_bucket_datetime=dim.get("datetime"),
+            cf_requests=g.get("count"),
+            cf_visits=s.get("visits"),
+            cf_request_bytes=s.get("edgeRequestBytes"),
+            cf_response_bytes=s.get("edgeResponseBytes"),
+        )
+
+
 def poll_http_by_status(zone: dict, start: str, end: str) -> None:
     """HTTP requests grouped by edge-response status — drives the
     "status code breakdown" pie + the bad-status alerting on the
@@ -464,13 +517,17 @@ AGENT_FQDNS = [
 def _agent_name_from_qname(qname: str) -> str | None:
     """Extract the agent name from a query name. Returns one of
     'search', 'bookings', 'threat-intel', 'dns-audit', 'morpheus',
-    'ans' (transparency-log host + path-2 index leaf), or None
-    if the qname is unrelated."""
+    'ans' (the transparency-log host), 'index' (the path-2 index
+    SVCB leaf — broken out separately so the dashboard's per-agent
+    table shows index discovery distinctly from ans-host hits), or
+    None if the qname is unrelated."""
     q = (qname or "").lower().rstrip(".")
     if not q.endswith(".darknetian.com"):
         return None
-    if q == "ans.darknetian.com" or q == "index._agents.darknetian.com":
+    if q == "ans.darknetian.com":
         return "ans"
+    if q == "index._agents.darknetian.com" or q == "_index._agents.darknetian.com":
+        return "index"
     for agent in ("search", "bookings", "threat-intel", "dns-audit", "morpheus"):
         # Matches: <agent>.darknetian.com, <agent>._agents.darknetian.com,
         # _443._tcp.<agent>.darknetian.com
@@ -657,6 +714,7 @@ def main() -> None:
     for zone in zones:
         _safe(f"{zone['name']}:zone_info",    lambda z=zone: poll_zone_info(z))
         _safe(f"{zone['name']}:http",         lambda z=zone: poll_http_requests(z, start, end))
+        _safe(f"{zone['name']}:http_host",    lambda z=zone: poll_http_by_host(z, start, end))
         _safe(f"{zone['name']}:http_status",  lambda z=zone: poll_http_by_status(z, start, end))
         _safe(f"{zone['name']}:firewall",     lambda z=zone: poll_firewall_events(z, start, end, state))
         _safe(f"{zone['name']}:dns",          lambda z=zone: poll_dns(z, start, end))

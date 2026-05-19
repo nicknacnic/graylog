@@ -64,8 +64,10 @@ def numeric(title: str, query: str, fn: str, *, timerange: int = DAY,
 
 
 def line_over_time(title: str, query: str, series: list[tuple[str, str]],
-                   *, timerange: int = WEEK, pos: dict) -> dict:
-    return {
+                   *, timerange: int = WEEK, pos: dict,
+                   column_field: str | None = None,
+                   column_limit: int = 10) -> dict:
+    spec = {
         "title": title, "kind": "agg", "viz": "line",
         "query": query, "timerange": timerange,
         "row_field": "timestamp",
@@ -73,6 +75,10 @@ def line_over_time(title: str, query: str, series: list[tuple[str, str]],
         "pivot_series": [_pivot_series_for(fn) for _, fn in series],
         "pos": pos,
     }
+    if column_field:
+        spec["column_field"] = column_field
+        spec["column_limit"] = column_limit
+    return spec
 
 
 def bar_categorical(title: str, query: str, *, field: str, pos: dict,
@@ -160,7 +166,7 @@ def page_traffic() -> list[dict]:
             "cf_event_type:requests_by_status",
             field="cf_status",
             pos={"col": 10, "row": 7, "width": 3, "height": 4}),
-        # Row 4: top countries + top hosts
+        # Row 4: top countries + top hosts (from the status-grouped feed)
         bar_categorical("Top countries by request count (24h)",
                         "cf_event_type:requests_by_status",
                         field="cf_country",
@@ -171,6 +177,25 @@ def page_traffic() -> list[dict]:
                         field="cf_host",
                         pos={"col": 7, "row": 11, "width": 6, "height": 4},
                         row_limit=10),
+        # Row 5: per-host breakdown table from the host-dimensioned
+        # feed (cf_event_type:requests_host_5m). Separates www / ans /
+        # apex etc. by clientRequestHTTPHost so the zone-aggregate
+        # numerics above can be sliced.
+        table("Requests + visits by host (24h)",
+              "cf_event_type:requests_host_5m",
+              row_field="cf_request_host",
+              series=[("requests",   "sum(cf_requests)"),
+                      ("visits",     "sum(cf_visits)"),
+                      ("resp bytes", "sum(cf_response_bytes)"),
+                      ("req bytes",  "sum(cf_request_bytes)")],
+              pos={"col": 1, "row": 15, "width": 12, "height": 5}, row_limit=15),
+        # Row 6: requests over time per host
+        line_over_time("Requests over 24h, per host (5-min buckets)",
+                       "cf_event_type:requests_host_5m",
+                       series=[("requests", "sum(cf_requests)")],
+                       column_field="cf_request_host",
+                       pos={"col": 1, "row": 20, "width": 12, "height": 4},
+                       timerange=DAY),
     ]
 
 
