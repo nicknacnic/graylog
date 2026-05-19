@@ -352,6 +352,29 @@ install_dnstap_collector() {
 
 install_dnstap_collector
 
+# Synthetic CTEM emitter — keeps the Darknetian dashboard page populated
+# with fake findings now that the real DMARC/SPF/DKIM misconfigs are
+# fixed on Cloudflare. Five canned events, hourly, all tagged
+# _synthetic=true + _adapter=synthetic + _bounty_eligible=false.
+install_ctem_synthetic() {
+  local user=ctem-synthetic
+  local src=pollers/ctem_synthetic.py
+
+  if [[ ! -f "$src" ]]; then
+    echo "skip ctem-synthetic (no $src in repo)"
+    return
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -o root -g root -m 0755 /opt/ctem-synthetic
+  install -m 0755 "$src" /opt/ctem-synthetic/
+  install -m 0644 systemd/ctem-synthetic.service /etc/systemd/system/
+  install -m 0644 systemd/ctem-synthetic.timer   /etc/systemd/system/
+}
+
+install_ctem_synthetic
+
 # Auto-rotate watchdog: watches Graylog's indexer-failures count and
 # rotates the offending index set when it spikes. Same single-unit
 # shape as cf-poller.
@@ -404,6 +427,7 @@ systemctl enable --now \
   wan-perf-poller.timer \
   cf-to-nios-sync.timer \
   dnstap-collector.service \
+  ctem-synthetic.timer \
   graylog-auto-rotate.timer
 
 echo "installed. Status:"
@@ -417,4 +441,5 @@ systemctl --no-pager status \
   wan-perf-poller.timer \
   cf-to-nios-sync.timer \
   dnstap-collector.service \
+  ctem-synthetic.timer \
   graylog-auto-rotate.timer || true

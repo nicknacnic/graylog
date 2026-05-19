@@ -1,0 +1,11 @@
+[Unit]
+Description=Run synthetic CTEM emitter hourly
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+AccuracySec=60s
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

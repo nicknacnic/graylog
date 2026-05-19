@@ -1,0 +1,22 @@
+[Unit]
+Description=Emit synthetic CTEM findings to Graylog (keeps Darknetian page populated)
+After=network-online.target graylog-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ctem-synthetic
+Group=ctem-synthetic
+EnvironmentFile=-/etc/ctem-synthetic/env
+ExecStart=/usr/bin/python3 /opt/ctem-synthetic/ctem_synthetic.py
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
