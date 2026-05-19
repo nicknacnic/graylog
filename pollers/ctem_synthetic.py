@@ -59,7 +59,12 @@ class T:
     asset: str
     short: str
     evidence: str
-    category: str  # "baseline" or "attack"
+    category: str        # "baseline" or "attack"
+    bounty: bool = False  # in-scope for the Darknetian VDP
+
+
+BOUNTY_PLATFORM = "hackerone"
+BOUNTY_POLICY_URL = "https://hackerone.com/darknetian"
 
 
 # ─── Template pool ────────────────────────────────────────────────────────
@@ -85,7 +90,7 @@ TEMPLATES: list[T] = [
     T("infoblox_ctem", "dangling_dns", "high", "demo-dangle.darknetian.example",
       "Dangling CNAME → nonexistent S3 bucket",
       "CNAME → nonexistent-bucket-1.s3.amazonaws.com; <Code>NoSuchBucket</Code>",
-      "baseline"),
+      "baseline", bounty=True),
     T("infoblox_lookalikes", "lookalike_domain", "medium", "darknetian.com",
       "Lookalike: darknet1an.com (digit-1-for-i)",
       "Registered via Namecheap, no MX, parked nameservers — typosquat-for-resale profile",
@@ -105,27 +110,27 @@ TEMPLATES: list[T] = [
     T("dangling_dns", "dangling_dns", "high", "demo-cf.darknetian.example",
       "Dangling DNS: CNAME → vanished CloudFront distribution",
       "CNAME → d1234567890.cloudfront.net; returns NoSuchDistribution",
-      "baseline"),
+      "baseline", bounty=True),
 
     # attack-flavored
     T("infoblox_ctem", "admin_panel_exposed", "critical",
       "demo-jenkins.darknetian.example",
       "Admin panel: Jenkins /login reachable on public DNS",
       "GET /login → 200, X-Jenkins: 2.426.3, anonymous read enabled",
-      "attack"),
+      "attack", bounty=True),
     T("infoblox_ctem", "admin_panel_exposed", "high",
       "demo-grafana.darknetian.example",
       "Admin panel: Grafana /login reachable on public DNS",
       "GET /login → 200, Grafana 10.4.0, basic-auth required",
-      "attack"),
+      "attack", bounty=True),
     T("infoblox_ctem", "weak_tls", "high", "demo-api.darknetian.example",
       "Weak TLS: TLS 1.0 + RC4 cipher accepted",
       "openssl s_client -tls1 → handshake OK, cipher TLS_RSA_WITH_RC4_128_SHA",
-      "attack"),
+      "attack", bounty=True),
     T("infoblox_ctem", "weak_tls", "medium", "demo-mail.darknetian.example",
       "Weak TLS: SHA-1 cert chain",
       "openssl s_client → leaf cert signature algorithm = sha1WithRSAEncryption",
-      "attack"),
+      "attack", bounty=True),
     T("infoblox_lookalikes", "lookalike_domain", "high", "darknetian.com",
       "Lookalike: darknetían.com (Latin Small Letter I With Acute)",
       "Registered via NameSilo, MX → mailgun.org — phishing posture",
@@ -283,9 +288,9 @@ def emit_one(tpl: T, when: datetime, suffix: str = "") -> bool:
         "_adapter": tpl.adapter,
         "_external_id": ext_id,
         "_finding_id": ext_id,
-        "_bounty_eligible": "false",
-        "_bounty_platform": "",
-        "_bounty_policy_url": "",
+        "_bounty_eligible": "true" if tpl.bounty else "false",
+        "_bounty_platform": BOUNTY_PLATFORM if tpl.bounty else "",
+        "_bounty_policy_url": BOUNTY_POLICY_URL if tpl.bounty else "",
         "_run_id": run_id,
         "_synthetic": "true",
     }
