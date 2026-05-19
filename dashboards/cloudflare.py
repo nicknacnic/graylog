@@ -96,8 +96,9 @@ def pie(title: str, query: str, *, field: str, pos: dict,
 
 
 def table(title: str, query: str, *, row_field: str, series: list[tuple[str, str]],
-          pos: dict, timerange: int = DAY, row_limit: int = 25) -> dict:
-    return {
+          pos: dict, timerange: int = DAY, row_limit: int = 25,
+          column_field: str | None = None, column_limit: int = 10) -> dict:
+    spec = {
         "title": title, "kind": "agg", "viz": "table",
         "query": query, "timerange": timerange,
         "row_field": row_field, "row_limit": row_limit,
@@ -105,6 +106,10 @@ def table(title: str, query: str, *, row_field: str, series: list[tuple[str, str
         "pivot_series": [_pivot_series_for(fn) for _, fn in series],
         "pos": pos,
     }
+    if column_field:
+        spec["column_field"] = column_field
+        spec["column_limit"] = column_limit
+    return spec
 
 
 def messages_list(title: str, query: str, *, pos: dict, timerange: int = DAY) -> dict:
@@ -332,14 +337,16 @@ def page_agents() -> list[dict]:
                 "cf_event_type:dns_agent AND cf_dns_response_code:NXDOMAIN",
                 "sum(cf_dns_queries)",
                 pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="q"),
-        # Row 2: per-agent breakdown table
-        table("Per-agent query volume + unique resolvers (24h)",
+        # Row 2: per-agent breakdown — query volume by record type
+        # (column_field=cf_dns_query_type breaks each agent row into a
+        # column per type, so SVCB / TXT / TLSA / A / AAAA volumes are
+        # directly visible per agent).
+        table("Per-agent query volume by record type (24h)",
               "cf_event_type:dns_agent",
               row_field="cf_dns_agent",
+              column_field="cf_dns_query_type", column_limit=8,
               series=[("queries",          "sum(cf_dns_queries)"),
-                      ("unique resolvers", "cardinality(cf_dns_source_ip)"),
-                      ("query types",      "cardinality(cf_dns_query_type)"),
-                      ("distinct records", "cardinality(cf_dns_query_name)")],
+                      ("unique resolvers", "cardinality(cf_dns_source_ip)")],
               pos={"col": 1, "row": 3, "width": 12, "height": 4}, row_limit=10),
         # Row 3: distributions
         pie("Queries by agent (24h)",
@@ -350,32 +357,35 @@ def page_agents() -> list[dict]:
             "cf_event_type:dns_agent",
             field="cf_dns_query_type",
             pos={"col": 7, "row": 7, "width": 6, "height": 4}),
-        # Row 4: per-record table — finer than per-agent
-        table("Per-record query volume (24h)",
+        # Row 4: per-record table — finer than per-agent. Same per-type
+        # split so each record's SVCB vs TXT vs TLSA volume is visible.
+        table("Per-record query volume by record type (24h)",
               "cf_event_type:dns_agent",
               row_field="cf_dns_query_name",
+              column_field="cf_dns_query_type", column_limit=8,
               series=[("queries",         "sum(cf_dns_queries)"),
-                      ("unique resolvers","cardinality(cf_dns_source_ip)"),
-                      ("agent",           "latest(cf_dns_agent)")],
+                      ("unique resolvers","cardinality(cf_dns_source_ip)")],
               pos={"col": 1, "row": 11, "width": 12, "height": 5}, row_limit=25),
-        # Row 5: top resolvers (recursive IPs hitting the agents)
+        # Row 5: top resolvers (recursive IPs hitting the agents) +
+        # per-type breakdown so you can tell which resolvers are doing
+        # which kind of agent discovery (SVCB walkers vs TXT readers).
         table("Top recursive resolvers asking about agents (24h)",
               "cf_event_type:dns_agent",
               row_field="cf_dns_source_ip",
+              column_field="cf_dns_query_type", column_limit=8,
               series=[("queries",         "sum(cf_dns_queries)"),
-                      ("distinct agents", "cardinality(cf_dns_agent)"),
-                      ("records hit",     "cardinality(cf_dns_query_name)")],
+                      ("distinct agents", "cardinality(cf_dns_agent)")],
               pos={"col": 1, "row": 16, "width": 12, "height": 5}, row_limit=25),
         # Row 6: ANS-specific lookups — `ans.darknetian.com` (TL host) and
         # `index._agents.darknetian.com` (path-2 index SVCB leaf). Both are
         # managed-by-darknetian-ans records per the 2026-05-15 post.
+        # Per-type breakdown shows the SVCB/TXT walk pattern explicitly.
         table("ANS lookups — TL host + path-2 index (24h)",
               "cf_event_type:dns_agent AND cf_dns_agent:ans",
               row_field="cf_dns_query_name",
+              column_field="cf_dns_query_type", column_limit=8,
               series=[("queries",          "sum(cf_dns_queries)"),
-                      ("unique resolvers", "cardinality(cf_dns_source_ip)"),
-                      ("query types",      "cardinality(cf_dns_query_type)"),
-                      ("response codes",   "cardinality(cf_dns_response_code)")],
+                      ("unique resolvers", "cardinality(cf_dns_source_ip)")],
               pos={"col": 1, "row": 21, "width": 12, "height": 5}, row_limit=10),
     ]
 
