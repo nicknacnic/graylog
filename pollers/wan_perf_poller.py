@@ -235,7 +235,12 @@ def _time_dns(resolver_ip: str, query: str) -> float | None:
     qbody = qname + struct.pack(">HH", 1, 1)  # A, IN
     pkt = header + qbody
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.settimeout(2.5)
+    # ns1 (local BIND) cold-cache recursion can hit 1-2s on this grid
+    # because its upstream forwarder chain is slow; 2.5s was tripping
+    # before a real answer came back. 5s is the sweet spot — still
+    # below the systemd 30s service timeout, generous enough to catch
+    # the slowest legitimate response.
+    s.settimeout(5.0)
     try:
         t0 = time.monotonic()
         s.sendto(pkt, (resolver_ip, 53))
@@ -275,7 +280,7 @@ def run_dns_timing() -> None:
         }
         if ms is None:
             gelf(f"dns_timing {r}: timeout/error", level=4,
-                 **common, cp_dns_query_ms=2500.0)
+                 **common, cp_dns_query_ms=5000.0)
             print(f"  dns {r} ({resolver_ip}) {query}: timeout")
             continue
         gelf(f"dns_timing {r} {query}: {ms}ms",

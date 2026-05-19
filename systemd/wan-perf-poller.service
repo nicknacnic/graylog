@@ -21,5 +21,9 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 LockPersonality=true
-# ping needs cap_net_raw on most distros; iputils-ping is suid-root by
-# default on Ubuntu so this works without granting extra caps.
+# ping needs CAP_NET_RAW to open raw ICMP sockets. With
+# NoNewPrivileges=true the kernel ignores the file capability that
+# iputils-ping ships with — we have to grant it explicitly through
+# systemd's ambient-caps mechanism instead.
+CapabilityBoundingSet=CAP_NET_RAW
+AmbientCapabilities=CAP_NET_RAW
