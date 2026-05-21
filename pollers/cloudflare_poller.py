@@ -112,13 +112,14 @@ def cf_graphql(query: str, variables: dict | None = None) -> Any:
     return resp.get("data") or {}
 
 
-def gelf(short_message: str, *, host: str, level: int = 6, **fields: Any) -> None:
+def gelf(short_message: str, *, host: str, level: int = 6,
+         timestamp: float | None = None, **fields: Any) -> None:
     msg = {
         "version": "1.1",
         "host": host,
         "short_message": short_message[:1024],
         "level": level,
-        "timestamp": time.time(),
+        "timestamp": timestamp if timestamp is not None else time.time(),
     }
     for k, v in fields.items():
         if v is None:
@@ -716,6 +717,105 @@ def poll_workers_invocations(start: str, end: str) -> None:
             )
 
 
+def poll_workers_ae() -> None:
+    """Per-call detail from Workers Analytics Engine — the
+    `anthropic_calls` dataset the darknetian-bookings worker writes to
+    via env.AE.writeDataPoint after each CMA session turn.
+
+    AE GraphQL only exposes account-level aggregates (no blob/double
+    slicing — that endpoint is built for high-level admin views), so
+    we hit the SQL API. Each row is one
+      (model, surface, tool, session_id, stop_reason)
+    group within the last 24h, with token + latency aggregates.
+
+    Token values are CUMULATIVE per CMA session — the same session
+    polled later returns growing totals. Re-emit absolutes every
+    cycle; the dashboard uses latest(input_tokens) per session_id for
+    current state, and max(... per session) summed across sessions
+    for org-level day totals.
+    """
+    try:
+        accounts = (cf_get("/accounts") or {}).get("result") or []
+    except error.HTTPError as e:
+        if e.code in (401, 403):
+            return
+        raise
+    if not accounts:
+        return
+    acct_id = accounts[0]["id"]
+
+    sql = (
+        "SELECT "
+        "blob1 AS model, "
+        "blob2 AS surface, "
+        "blob3 AS tool, "
+        "blob4 AS session_id, "
+        "blob5 AS stop_reason, "
+        "SUM(_sample_interval * double1) AS input_tokens, "
+        "SUM(_sample_interval * double2) AS output_tokens, "
+        "SUM(_sample_interval * double3) AS cache_read, "
+        "SUM(_sample_interval * double4) AS cache_create, "
+        "AVG(double5) AS avg_latency_ms, "
+        "MAX(double5) AS max_latency_ms, "
+        "COUNT() AS samples, "
+        "MAX(timestamp) AS last_seen "
+        "FROM anthropic_calls "
+        "WHERE timestamp > NOW() - INTERVAL '24' HOUR "
+        "GROUP BY blob1, blob2, blob3, blob4, blob5 "
+        "FORMAT JSON"
+    )
+    url = f"https://api.cloudflare.com/client/v4/accounts/{acct_id}/analytics_engine/sql"
+    req = request.Request(url, data=sql.encode(), headers={
+        "Authorization": f"Bearer {CF_API_TOKEN}",
+        "Content-Type": "text/plain",
+    })
+    try:
+        with request.urlopen(req, timeout=30) as r:
+            body = json.loads(r.read())
+    except error.HTTPError as e:
+        snippet = e.read().decode("utf-8", "replace")[:200]
+        print(f"AE SQL error {e.code}: {snippet}", file=sys.stderr)
+        return
+
+    rows = body.get("data") or []
+    for r in rows:
+        # last_seen is ClickHouse DateTime ("YYYY-MM-DD HH:MM:SS")
+        # — convert to epoch float so the GELF event lands at the
+        # observed time, not poll time.
+        ts = None
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            ls = r.get("last_seen") or ""
+            if ls:
+                ts = _dt.strptime(ls, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_tz.utc).timestamp()
+        except Exception:
+            ts = None
+
+        in_tok = int(r.get("input_tokens") or 0)
+        out_tok = int(r.get("output_tokens") or 0)
+        gelf(
+            f"AE {r.get('model','?')} {r.get('surface','?')} "
+            f"{(r.get('tool') or '(none)')} sess={(r.get('session_id') or '')[:14]}.. "
+            f"in={in_tok} out={out_tok} ms={r.get('avg_latency_ms') or 0:.0f}",
+            host="cloudflare-anthropic",
+            timestamp=ts,
+            cf_event_type="anthropic_call",
+            ant_model=r.get("model"),
+            ant_surface=r.get("surface"),
+            ant_tool=r.get("tool") or "(none)",
+            ant_session_id=r.get("session_id"),
+            ant_stop_reason=r.get("stop_reason"),
+            ant_input_tokens=in_tok,
+            ant_output_tokens=out_tok,
+            ant_cache_read_tokens=int(r.get("cache_read") or 0),
+            ant_cache_creation_tokens=int(r.get("cache_create") or 0),
+            ant_avg_latency_ms=r.get("avg_latency_ms"),
+            ant_max_latency_ms=r.get("max_latency_ms"),
+            ant_samples=r.get("samples"),
+            ant_last_seen=r.get("last_seen"),
+        )
+
+
 def poll_audit_logs(start: str, state: dict) -> None:
     """Account-level audit events (config changes). Dedupes on event Id.
 
@@ -798,6 +898,7 @@ def main() -> None:
 
     _safe("audit_logs", lambda: poll_audit_logs(start, state))
     _safe("workers_invocations", lambda: poll_workers_invocations(start, end))
+    _safe("workers_ae",          lambda: poll_workers_ae())
     save_state(state)
     print("done.")
 

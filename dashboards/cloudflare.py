@@ -482,6 +482,78 @@ def page_anthropic() -> list[dict]:
                        column_field="cf_worker_status", column_limit=8,
                        pos={"col": 1, "row": 19, "width": 12, "height": 4},
                        timerange=WEEK),
+
+        # ─── Per-call detail from Workers Analytics Engine ─────────────
+        # (worker writes one datapoint per CMA session turn — the
+        # poller pulls via AE SQL once per cycle; row count = unique
+        # (model, surface, tool, session, stop_reason) combos.)
+        # Token values are CUMULATIVE per session; latest() captures
+        # final session state; sum-of-max-per-session = day total.
+        numeric("Active sessions (24h)",
+                "cf_event_type:anthropic_call",
+                "cardinality(ant_session_id)",
+                pos={"col": 1, "row": 23, "width": 3, "height": 2}, name="sess"),
+        numeric("Total in-tokens (24h)",
+                "cf_event_type:anthropic_call",
+                "sum(ant_input_tokens)",
+                pos={"col": 4, "row": 23, "width": 3, "height": 2}, name="tok"),
+        numeric("Total out-tokens (24h)",
+                "cf_event_type:anthropic_call",
+                "sum(ant_output_tokens)",
+                pos={"col": 7, "row": 23, "width": 3, "height": 2}, name="tok"),
+        numeric("Avg session latency ms (24h)",
+                "cf_event_type:anthropic_call",
+                "avg(ant_avg_latency_ms)",
+                pos={"col": 10, "row": 23, "width": 3, "height": 2}, name="ms"),
+
+        # Per-surface call mix + latency
+        pie("Calls by surface (24h)",
+            "cf_event_type:anthropic_call",
+            field="ant_surface",
+            pos={"col": 1, "row": 25, "width": 4, "height": 4}),
+        pie("Stop-reason mix (24h)",
+            "cf_event_type:anthropic_call",
+            field="ant_stop_reason",
+            pos={"col": 5, "row": 25, "width": 4, "height": 4}),
+        pie("Top tools fired (24h)",
+            'cf_event_type:anthropic_call AND NOT ant_tool:"(none)"',
+            field="ant_tool",
+            pos={"col": 9, "row": 25, "width": 4, "height": 4}),
+
+        # Per-surface table — sessions, tokens, latency
+        table("Per-surface usage (24h)",
+              "cf_event_type:anthropic_call",
+              row_field="ant_surface",
+              series=[("sessions",  "cardinality(ant_session_id)"),
+                      ("in tokens", "sum(ant_input_tokens)"),
+                      ("out tokens","sum(ant_output_tokens)"),
+                      ("avg ms",    "avg(ant_avg_latency_ms)"),
+                      ("max ms",    "max(ant_max_latency_ms)")],
+              pos={"col": 1, "row": 29, "width": 12, "height": 4}, row_limit=10),
+
+        # Per-model table — useful once multiple models in play
+        table("Per-model usage (24h)",
+              "cf_event_type:anthropic_call",
+              row_field="ant_model",
+              series=[("sessions",  "cardinality(ant_session_id)"),
+                      ("in tokens", "sum(ant_input_tokens)"),
+                      ("out tokens","sum(ant_output_tokens)"),
+                      ("avg ms",    "avg(ant_avg_latency_ms)")],
+              pos={"col": 1, "row": 33, "width": 12, "height": 4}, row_limit=10),
+
+        # Top sessions by output token usage
+        table("Top sessions by output tokens (24h)",
+              "cf_event_type:anthropic_call",
+              row_field="ant_session_id",
+              series=[("model",       "latest(ant_model)"),
+                      ("surface",     "latest(ant_surface)"),
+                      ("tool",        "latest(ant_tool)"),
+                      ("in tokens",   "latest(ant_input_tokens)"),
+                      ("out tokens",  "latest(ant_output_tokens)"),
+                      ("cache read",  "latest(ant_cache_read_tokens)"),
+                      ("stop",        "latest(ant_stop_reason)"),
+                      ("avg ms",      "latest(ant_avg_latency_ms)")],
+              pos={"col": 1, "row": 37, "width": 12, "height": 6}, row_limit=25),
     ]
 
 
