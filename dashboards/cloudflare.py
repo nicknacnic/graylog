@@ -417,6 +417,74 @@ def page_agents() -> list[dict]:
 
 # ── build / apply ────────────────────────────────────────────────────────────
 
+def page_anthropic() -> list[dict]:
+    """Workers Invocations metrics for darknetian-bookings (and any
+    other Workers script in the account). Sourced from
+    workersInvocationsAdaptive — request/error/subrequest counts +
+    cpu/wall latency quantiles per script-hour.
+
+    Token-level Anthropic detail (model, in/out tokens, /ask vs /mcp
+    vs /a2a, which tool) is NOT in this feed — it needs an Analytics
+    Engine binding on the worker (see ai-catalog/AE notes). Once AE
+    is wired, this page gets a sibling.
+    """
+    INV = "cf_event_type:worker_invocations"
+    BK  = f"{INV} AND cf_worker_script:darknetian-bookings"
+    return [
+        # Row 1: headline tiles — bookings worker
+        numeric("Bookings requests (24h)", BK, "sum(cf_worker_requests)",
+                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="req"),
+        numeric("Bookings subrequests (24h)", BK,
+                "sum(cf_worker_subrequests)",
+                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="sub"),
+        numeric("Bookings errors (24h)", BK, "sum(cf_worker_errors)",
+                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="err"),
+        numeric("Bookings CPU p99 µs (24h)", BK, "max(cf_worker_cpu_p99_us)",
+                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="µs"),
+        # Row 2: requests over 7d, per worker
+        line_over_time("Requests over 7d, per worker",
+                       INV, series=[("requests", "sum(cf_worker_requests)")],
+                       column_field="cf_worker_script",
+                       pos={"col": 1, "row": 3, "width": 12, "height": 4},
+                       timerange=WEEK),
+        # Row 3: latency p99 over 7d for bookings (wall = real time
+        # including Anthropic streaming)
+        line_over_time("Bookings wall-time p50/p99 over 7d (µs)",
+                       BK,
+                       series=[("p50 wall", "avg(cf_worker_wall_p50_us)"),
+                               ("p99 wall", "avg(cf_worker_wall_p99_us)")],
+                       pos={"col": 1, "row": 7, "width": 6, "height": 4},
+                       timerange=WEEK),
+        line_over_time("Bookings CPU p50/p99 over 7d (µs)",
+                       BK,
+                       series=[("p50 cpu", "avg(cf_worker_cpu_p50_us)"),
+                               ("p99 cpu", "avg(cf_worker_cpu_p99_us)")],
+                       pos={"col": 7, "row": 7, "width": 6, "height": 4},
+                       timerange=WEEK),
+        # Row 4: subrequests over time (= upstream Anthropic calls)
+        line_over_time("Bookings subrequests over 7d (upstream Anthropic calls)",
+                       BK,
+                       series=[("subrequests", "sum(cf_worker_subrequests)")],
+                       pos={"col": 1, "row": 11, "width": 12, "height": 4},
+                       timerange=WEEK),
+        # Row 5: per-worker × status summary table
+        table("Per-worker × status (7d)", INV,
+              row_field="cf_worker_script",
+              column_field="cf_worker_status", column_limit=6,
+              series=[("requests", "sum(cf_worker_requests)"),
+                      ("errors",   "sum(cf_worker_errors)")],
+              pos={"col": 1, "row": 15, "width": 12, "height": 4},
+              timerange=WEEK, row_limit=15),
+        # Row 6: error breakdown over time (script clientDisconnected etc)
+        line_over_time("Non-success outcomes over 7d, per status",
+                       f"{INV} AND NOT cf_worker_status:success",
+                       series=[("requests", "sum(cf_worker_requests)")],
+                       column_field="cf_worker_status", column_limit=8,
+                       pos={"col": 1, "row": 19, "width": 12, "height": 4},
+                       timerange=WEEK),
+    ]
+
+
 def build():
     stream_id = resolve_stream_id(STREAM_TITLE)
     page_defs = [
@@ -424,6 +492,7 @@ def build():
         ("Threats", page_threats, DAY),
         ("DNS & Audit", page_dns_audit, WEEK),
         ("Agents", page_agents, WEEK),
+        ("Anthropic", page_anthropic, WEEK),
     ]
     pages_for_search: list[dict] = []
     pages_for_view: list[dict] = []

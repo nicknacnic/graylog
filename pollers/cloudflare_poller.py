@@ -641,6 +641,81 @@ def poll_dns_agents(zone: dict, start: str, end: str) -> None:
         )
 
 
+def poll_workers_invocations(start: str, end: str) -> None:
+    """Per-script-per-hour-per-status invocation metrics for every
+    Workers script on every account the token can see.
+
+    Source: workersInvocationsAdaptive on the account-level GraphQL
+    endpoint. Carries request count, error count, subrequest count,
+    p50/p99 cpu+wall time per (script × hour × status). Doesn't carry
+    per-call detail (model, token counts, which tool) — for that the
+    worker would write to Workers Analytics Engine and we'd add a
+    separate poller.
+
+    Each (script × hour × status) group becomes one GELF event with
+    cf_event_type=worker_invocations.
+    """
+    try:
+        accounts = (cf_get("/accounts") or {}).get("result") or []
+    except error.HTTPError as e:
+        if e.code in (401, 403):
+            return
+        raise
+
+    q = """
+    query($acct: String!, $s: Time!, $e: Time!) {
+      viewer {
+        accounts(filter: {accountTag: $acct}) {
+          workersInvocationsAdaptive(
+            limit: 1000,
+            filter: {datetime_geq: $s, datetime_lt: $e},
+            orderBy: [datetimeHour_DESC]
+          ) {
+            dimensions { datetimeHour scriptName status }
+            sum       { requests subrequests errors duration }
+            quantiles { cpuTimeP50 cpuTimeP99 wallTimeP50 wallTimeP99 }
+          }
+        }
+      }
+    }
+    """
+    for acc in accounts:
+        acc_id = acc["id"]
+        try:
+            data = cf_graphql(q, {"acct": acc_id, "s": start, "e": end})
+        except error.HTTPError as e:
+            if e.code in (401, 403):
+                continue
+            raise
+        accs = ((data.get("viewer") or {}).get("accounts")) or []
+        if not accs:
+            continue
+        for g in (accs[0].get("workersInvocationsAdaptive") or []):
+            dim = g.get("dimensions") or {}
+            sm = g.get("sum") or {}
+            qt = g.get("quantiles") or {}
+            script = dim.get("scriptName") or "?"
+            gelf(
+                f"WORKER {script} @ {dim.get('datetimeHour')} {dim.get('status')}: "
+                f"{sm.get('requests')} req, {sm.get('errors')} err",
+                host=f"cloudflare-worker-{script}",
+                cf_event_type="worker_invocations",
+                cf_account_id=acc_id,
+                cf_account_name=acc.get("name"),
+                cf_worker_script=script,
+                cf_worker_status=dim.get("status"),
+                cf_bucket_datetime=dim.get("datetimeHour"),
+                cf_worker_requests=sm.get("requests"),
+                cf_worker_subrequests=sm.get("subrequests"),
+                cf_worker_errors=sm.get("errors"),
+                cf_worker_duration_sum=sm.get("duration"),
+                cf_worker_cpu_p50_us=qt.get("cpuTimeP50"),
+                cf_worker_cpu_p99_us=qt.get("cpuTimeP99"),
+                cf_worker_wall_p50_us=qt.get("wallTimeP50"),
+                cf_worker_wall_p99_us=qt.get("wallTimeP99"),
+            )
+
+
 def poll_audit_logs(start: str, state: dict) -> None:
     """Account-level audit events (config changes). Dedupes on event Id.
 
@@ -722,6 +797,7 @@ def main() -> None:
         _safe(f"{zone['name']}:dns_agents",   lambda z=zone: poll_dns_agents(z, start, end))
 
     _safe("audit_logs", lambda: poll_audit_logs(start, state))
+    _safe("workers_invocations", lambda: poll_workers_invocations(start, end))
     save_state(state)
     print("done.")
 
