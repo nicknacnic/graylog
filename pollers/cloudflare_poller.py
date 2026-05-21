@@ -717,7 +717,33 @@ def poll_workers_invocations(start: str, end: str) -> None:
             )
 
 
-def poll_workers_ae() -> None:
+# ── Anthropic per-million-token pricing (USD) ────────────────────────────
+# Used to compute ant_usd_delta on each AE event. Update when Anthropic
+# changes prices — current as of 2026-05. Cache-creation pricing uses
+# the 5m ephemeral rate (the cheaper of 5m vs 1h); 1h would be ~2x.
+ANT_PRICING = {
+    "claude-opus-4-7":   {"in": 15.00, "out": 75.00, "cache_read": 1.50, "cache_create": 18.75},
+    "claude-opus-4-6":   {"in": 15.00, "out": 75.00, "cache_read": 1.50, "cache_create": 18.75},
+    "claude-sonnet-4-6": {"in":  3.00, "out": 15.00, "cache_read": 0.30, "cache_create":  3.75},
+    "claude-sonnet-4-5": {"in":  3.00, "out": 15.00, "cache_read": 0.30, "cache_create":  3.75},
+    "claude-haiku-4-5":  {"in":  0.80, "out":  4.00, "cache_read": 0.08, "cache_create":  1.00},
+    "_default":          {"in":  3.00, "out": 15.00, "cache_read": 0.30, "cache_create":  3.75},
+}
+
+# Optional: user-set monthly budget so the dashboard can render
+# "credits remaining" (Anthropic doesn't expose a balance API on
+# personal/self-serve plans — operator updates this manually on top-up).
+ANTHROPIC_BUDGET_USD = float(os.environ.get("ANTHROPIC_BUDGET_USD", "0") or 0)
+
+
+def _ant_usd(model: str, in_tok: int, out_tok: int,
+             cr_tok: int, cc_tok: int) -> float:
+    p = ANT_PRICING.get(model) or ANT_PRICING["_default"]
+    return ((in_tok * p["in"]) + (out_tok * p["out"])
+            + (cr_tok * p["cache_read"]) + (cc_tok * p["cache_create"])) / 1_000_000.0
+
+
+def poll_workers_ae(state: dict) -> None:
     """Per-call detail from Workers Analytics Engine — the
     `anthropic_calls` dataset the darknetian-bookings worker writes to
     via env.AE.writeDataPoint after each CMA session turn.
@@ -778,6 +804,46 @@ def poll_workers_ae() -> None:
         return
 
     rows = body.get("data") or []
+
+    # If ANTHROPIC_BUDGET_USD just changed (or this is the first run
+    # with state), bootstrap session baselines from the current AE
+    # snapshot WITHOUT emitting events. The tokens already accumulated
+    # by each session before this moment are already reflected in the
+    # operator-observed Console balance — we only want to track NEW
+    # spend from here forward against that balance.
+    last_known_budget = float(state.get("ae_last_budget_usd") or 0)
+    budget_just_set = (ANTHROPIC_BUDGET_USD > 0
+                       and abs(ANTHROPIC_BUDGET_USD - last_known_budget) > 1e-6)
+    if budget_just_set:
+        baseline: dict[str, dict] = {}
+        for r in rows:
+            sid = r.get("session_id") or ""
+            baseline[sid] = {
+                "in":  int(r.get("input_tokens") or 0),
+                "out": int(r.get("output_tokens") or 0),
+                "cr":  int(r.get("cache_read") or 0),
+                "cc":  int(r.get("cache_create") or 0),
+            }
+        state["ae_sessions"] = baseline
+        state["ae_last_budget_usd"] = ANTHROPIC_BUDGET_USD
+        state["ae_spent_since_budget_usd"] = 0.0
+        gelf(
+            f"BUDGET ${ANTHROPIC_BUDGET_USD:.2f} starting baseline "
+            f"(session snapshot only — no spend events this cycle)",
+            host="cloudflare-anthropic",
+            cf_event_type="anthropic_budget",
+            ant_budget_usd=ANTHROPIC_BUDGET_USD,
+            ant_budget_spent_cum_usd=0.0,
+            ant_budget_remaining_usd=ANTHROPIC_BUDGET_USD,
+        )
+        print(f"  AE budget set to ${ANTHROPIC_BUDGET_USD:.2f} — "
+              f"baselined {len(baseline)} sessions, emitted 0 spend events")
+        return
+
+    seen = state.get("ae_sessions") or {}
+    new_seen: dict[str, dict] = {}
+    total_usd_delta = 0.0
+
     for r in rows:
         # last_seen is ClickHouse DateTime ("YYYY-MM-DD HH:MM:SS")
         # — convert to epoch float so the GELF event lands at the
@@ -791,28 +857,79 @@ def poll_workers_ae() -> None:
         except Exception:
             ts = None
 
-        in_tok = int(r.get("input_tokens") or 0)
-        out_tok = int(r.get("output_tokens") or 0)
+        sid = r.get("session_id") or ""
+        cur = {
+            "in":  int(r.get("input_tokens") or 0),
+            "out": int(r.get("output_tokens") or 0),
+            "cr":  int(r.get("cache_read") or 0),
+            "cc":  int(r.get("cache_create") or 0),
+        }
+        new_seen[sid] = cur
+
+        last = seen.get(sid) or {"in": 0, "out": 0, "cr": 0, "cc": 0}
+        delta = {k: max(0, cur[k] - last[k]) for k in cur}
+        # If nothing new for a session we've already seen, skip — avoids
+        # re-emitting cumulative totals on every poll (which would
+        # inflate sum() widgets). First-time observations: delta = full
+        # cumulative, which is correct.
+        if sid in seen and sum(delta.values()) == 0:
+            continue
+
+        model = r.get("model") or ""
+        usd_delta = _ant_usd(model, delta["in"], delta["out"],
+                             delta["cr"], delta["cc"])
+        total_usd_delta += usd_delta
+
         gelf(
-            f"AE {r.get('model','?')} {r.get('surface','?')} "
-            f"{(r.get('tool') or '(none)')} sess={(r.get('session_id') or '')[:14]}.. "
-            f"in={in_tok} out={out_tok} ms={r.get('avg_latency_ms') or 0:.0f}",
+            f"AE {model} {r.get('surface','?')} "
+            f"{(r.get('tool') or '(none)')} sess={sid[:14]}.. "
+            f"Δin={delta['in']} Δout={delta['out']} "
+            f"${usd_delta:.4f} ms={r.get('avg_latency_ms') or 0:.0f}",
             host="cloudflare-anthropic",
             timestamp=ts,
             cf_event_type="anthropic_call",
-            ant_model=r.get("model"),
+            ant_model=model,
             ant_surface=r.get("surface"),
             ant_tool=r.get("tool") or "(none)",
-            ant_session_id=r.get("session_id"),
+            ant_session_id=sid,
             ant_stop_reason=r.get("stop_reason"),
-            ant_input_tokens=in_tok,
-            ant_output_tokens=out_tok,
-            ant_cache_read_tokens=int(r.get("cache_read") or 0),
-            ant_cache_creation_tokens=int(r.get("cache_create") or 0),
+            # Cumulative (for latest()-per-session widgets)
+            ant_input_tokens=cur["in"],
+            ant_output_tokens=cur["out"],
+            ant_cache_read_tokens=cur["cr"],
+            ant_cache_creation_tokens=cur["cc"],
+            # Delta since last poll (for sum() widgets — no double-count)
+            ant_input_tokens_delta=delta["in"],
+            ant_output_tokens_delta=delta["out"],
+            ant_cache_read_tokens_delta=delta["cr"],
+            ant_cache_creation_tokens_delta=delta["cc"],
+            ant_usd_delta=round(usd_delta, 6),
             ant_avg_latency_ms=r.get("avg_latency_ms"),
             ant_max_latency_ms=r.get("max_latency_ms"),
             ant_samples=r.get("samples"),
             ant_last_seen=r.get("last_seen"),
+        )
+
+    # Drop sessions that didn't appear in this cycle (they've aged out
+    # of AE's 24h window and won't come back). Bounded growth.
+    state["ae_sessions"] = new_seen
+
+    # Budget tracking — emit a fresh snapshot every cycle. The
+    # bootstrap branch at the top of the function handles env-changes
+    # and first runs; here we just accumulate forward.
+    if ANTHROPIC_BUDGET_USD > 0:
+        spent_since = float(state.get("ae_spent_since_budget_usd") or 0)
+        spent_since += total_usd_delta
+        state["ae_spent_since_budget_usd"] = spent_since
+        remaining = ANTHROPIC_BUDGET_USD - spent_since
+        gelf(
+            f"BUDGET ${ANTHROPIC_BUDGET_USD:.2f} starting, "
+            f"spent ${spent_since:.4f}, remaining ${remaining:.4f}",
+            host="cloudflare-anthropic",
+            cf_event_type="anthropic_budget",
+            ant_budget_usd=ANTHROPIC_BUDGET_USD,
+            ant_budget_spent_cum_usd=round(spent_since, 6),
+            ant_budget_remaining_usd=round(remaining, 6),
         )
 
 
@@ -898,7 +1015,7 @@ def main() -> None:
 
     _safe("audit_logs", lambda: poll_audit_logs(start, state))
     _safe("workers_invocations", lambda: poll_workers_invocations(start, end))
-    _safe("workers_ae",          lambda: poll_workers_ae())
+    _safe("workers_ae",          lambda: poll_workers_ae(state))
     save_state(state)
     print("done.")
 

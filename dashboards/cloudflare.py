@@ -418,142 +418,132 @@ def page_agents() -> list[dict]:
 # ── build / apply ────────────────────────────────────────────────────────────
 
 def page_anthropic() -> list[dict]:
-    """Workers Invocations metrics for darknetian-bookings (and any
-    other Workers script in the account). Sourced from
-    workersInvocationsAdaptive — request/error/subrequest counts +
-    cpu/wall latency quantiles per script-hour.
+    """darknetian-bookings worker — invocations + per-call AE detail.
 
-    Token-level Anthropic detail (model, in/out tokens, /ask vs /mcp
-    vs /a2a, which tool) is NOT in this feed — it needs an Analytics
-    Engine binding on the worker (see ai-catalog/AE notes). Once AE
-    is wired, this page gets a sibling.
+    Two data sources:
+      cf_event_type:worker_invocations  CF workersInvocationsAdaptive
+        — per-hour request/error/subrequest/cpu/wall buckets.
+      cf_event_type:anthropic_call      AE per-call rows pulled via
+        the CF AE SQL API. Token + latency + tool + stop_reason per
+        CMA session, emitted on delta so sum() = real new spend.
+      cf_event_type:anthropic_budget    one snapshot per cycle when
+        ANTHROPIC_BUDGET_USD is set; renders "credits remaining"
+        against the value last observed in the Anthropic Console.
+
+    "Bookings" semantics:
+      - 'Worker invocations' = every HTTP hit (includes health probes,
+        dev tests, scans). NOT a real bookings count.
+      - 'Meetings proposed' = sessions where propose_meeting tool
+        fired (i.e., the worker actually sent a calendar invite).
+        That's the real bookings number.
+
+    Subrequests = outbound fetches the worker makes per inbound hit
+    (Anthropic + ICS feeds + Resend). CF GraphQL doesn't dimension
+    these by destination URL; charted as an aggregate trend for now.
     """
     INV = "cf_event_type:worker_invocations"
     BK  = f"{INV} AND cf_worker_script:darknetian-bookings"
+    AE  = "cf_event_type:anthropic_call"
+    BG  = "cf_event_type:anthropic_budget"
+    BOOK = f'{AE} AND ant_tool:propose_meeting'    # real bookings (email sent)
     return [
-        # Row 1: headline tiles — bookings worker
-        numeric("Bookings requests (24h)", BK, "sum(cf_worker_requests)",
-                pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="req"),
-        numeric("Bookings subrequests (24h)", BK,
-                "sum(cf_worker_subrequests)",
-                pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="sub"),
-        numeric("Bookings errors (24h)", BK, "sum(cf_worker_errors)",
-                pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="err"),
-        numeric("Bookings CPU p99 µs (24h)", BK, "max(cf_worker_cpu_p99_us)",
-                pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="µs"),
-        # Row 2: requests over 7d, per worker
-        line_over_time("Requests over 7d, per worker",
-                       INV, series=[("requests", "sum(cf_worker_requests)")],
-                       column_field="cf_worker_script",
-                       pos={"col": 1, "row": 3, "width": 12, "height": 4},
+        # ─── Row 1 (height 2): bottom-line tiles ─────────────────────────
+        numeric("Meetings proposed (24h)", BOOK,
+                "cardinality(ant_session_id)",
+                pos={"col": 1, "row": 1, "width": 2, "height": 2}, name="book"),
+        numeric("Worker invocations (24h)", BK, "sum(cf_worker_requests)",
+                pos={"col": 3, "row": 1, "width": 2, "height": 2}, name="req"),
+        numeric("Anthropic sessions (24h)", AE,
+                "cardinality(ant_session_id)",
+                pos={"col": 5, "row": 1, "width": 2, "height": 2}, name="sess"),
+        numeric("Est. spend (24h)", AE, "sum(ant_usd_delta)",
+                pos={"col": 7, "row": 1, "width": 2, "height": 2}, name="$"),
+        numeric("Budget remaining", BG,
+                "latest(ant_budget_remaining_usd)",
+                pos={"col": 9, "row": 1, "width": 2, "height": 2}, name="$"),
+        numeric("Errors (24h)", BK, "sum(cf_worker_errors)",
+                pos={"col": 11, "row": 1, "width": 2, "height": 2}, name="err"),
+
+        # ─── Row 2 (height 3): spend + tokens over 7d ────────────────────
+        line_over_time("Estimated spend over 7d ($)", AE,
+                       series=[("$", "sum(ant_usd_delta)")],
+                       pos={"col": 1, "row": 3, "width": 6, "height": 3},
                        timerange=WEEK),
-        # Row 3: latency p99 over 7d for bookings (wall = real time
-        # including Anthropic streaming)
-        line_over_time("Bookings wall-time p50/p99 over 7d (µs)",
-                       BK,
-                       series=[("p50 wall", "avg(cf_worker_wall_p50_us)"),
-                               ("p99 wall", "avg(cf_worker_wall_p99_us)")],
-                       pos={"col": 1, "row": 7, "width": 6, "height": 4},
+        line_over_time("Token volume over 7d", AE,
+                       series=[("in",         "sum(ant_input_tokens_delta)"),
+                               ("out",        "sum(ant_output_tokens_delta)"),
+                               ("cache read", "sum(ant_cache_read_tokens_delta)")],
+                       pos={"col": 7, "row": 3, "width": 6, "height": 3},
                        timerange=WEEK),
-        line_over_time("Bookings CPU p50/p99 over 7d (µs)",
-                       BK,
-                       series=[("p50 cpu", "avg(cf_worker_cpu_p50_us)"),
-                               ("p99 cpu", "avg(cf_worker_cpu_p99_us)")],
-                       pos={"col": 7, "row": 7, "width": 6, "height": 4},
+
+        # ─── Row 3 (height 3): surface / stop / tool pies ────────────────
+        pie("Calls by surface (24h)", AE, field="ant_surface",
+            pos={"col": 1, "row": 6, "width": 4, "height": 3}),
+        pie("Stop-reason mix (24h)",  AE, field="ant_stop_reason",
+            pos={"col": 5, "row": 6, "width": 4, "height": 3}),
+        pie("Tools fired (24h)",
+            f'{AE} AND NOT ant_tool:"(none)"', field="ant_tool",
+            pos={"col": 9, "row": 6, "width": 4, "height": 3}),
+
+        # ─── Row 4 (height 4): per-surface + per-model side-by-side ──────
+        table("Per-surface usage (24h)", AE,
+              row_field="ant_surface",
+              series=[("sessions", "cardinality(ant_session_id)"),
+                      ("in",       "sum(ant_input_tokens_delta)"),
+                      ("out",      "sum(ant_output_tokens_delta)"),
+                      ("$",        "sum(ant_usd_delta)"),
+                      ("avg ms",   "avg(ant_avg_latency_ms)")],
+              pos={"col": 1, "row": 9, "width": 6, "height": 4}, row_limit=10),
+        table("Per-model usage (24h)", AE,
+              row_field="ant_model",
+              series=[("sessions", "cardinality(ant_session_id)"),
+                      ("in",       "sum(ant_input_tokens_delta)"),
+                      ("out",      "sum(ant_output_tokens_delta)"),
+                      ("$",        "sum(ant_usd_delta)"),
+                      ("avg ms",   "avg(ant_avg_latency_ms)")],
+              pos={"col": 7, "row": 9, "width": 6, "height": 4}, row_limit=10),
+
+        # ─── Row 5 (height 3): requests + subrequests over 7d ────────────
+        line_over_time("Bookings requests + subrequests over 7d", BK,
+                       series=[("requests",    "sum(cf_worker_requests)"),
+                               ("subrequests", "sum(cf_worker_subrequests)")],
+                       pos={"col": 1, "row": 13, "width": 12, "height": 3},
                        timerange=WEEK),
-        # Row 4: subrequests over time (= upstream Anthropic calls)
-        line_over_time("Bookings subrequests over 7d (upstream Anthropic calls)",
-                       BK,
-                       series=[("subrequests", "sum(cf_worker_subrequests)")],
-                       pos={"col": 1, "row": 11, "width": 12, "height": 4},
+
+        # ─── Row 6 (height 3): wall + cpu latency p50/p99 over 7d ────────
+        line_over_time("Wall-time p50/p99 over 7d (µs)", BK,
+                       series=[("p50", "avg(cf_worker_wall_p50_us)"),
+                               ("p99", "avg(cf_worker_wall_p99_us)")],
+                       pos={"col": 1, "row": 16, "width": 6, "height": 3},
                        timerange=WEEK),
-        # Row 5: per-worker × status summary table
-        table("Per-worker × status (7d)", INV,
-              row_field="cf_worker_script",
-              column_field="cf_worker_status", column_limit=6,
-              series=[("requests", "sum(cf_worker_requests)"),
-                      ("errors",   "sum(cf_worker_errors)")],
-              pos={"col": 1, "row": 15, "width": 12, "height": 4},
-              timerange=WEEK, row_limit=15),
-        # Row 6: error breakdown over time (script clientDisconnected etc)
-        line_over_time("Non-success outcomes over 7d, per status",
+        line_over_time("CPU p50/p99 over 7d (µs)", BK,
+                       series=[("p50", "avg(cf_worker_cpu_p50_us)"),
+                               ("p99", "avg(cf_worker_cpu_p99_us)")],
+                       pos={"col": 7, "row": 16, "width": 6, "height": 3},
+                       timerange=WEEK),
+
+        # ─── Row 7 (height 6): top sessions detail ───────────────────────
+        table("Top sessions by output tokens (24h)", AE,
+              row_field="ant_session_id",
+              series=[("model",      "latest(ant_model)"),
+                      ("surface",    "latest(ant_surface)"),
+                      ("tool",       "latest(ant_tool)"),
+                      ("in",         "latest(ant_input_tokens)"),
+                      ("out",        "latest(ant_output_tokens)"),
+                      ("cache read", "latest(ant_cache_read_tokens)"),
+                      ("$",          "sum(ant_usd_delta)"),
+                      ("stop",       "latest(ant_stop_reason)"),
+                      ("ms",         "latest(ant_avg_latency_ms)")],
+              pos={"col": 1, "row": 19, "width": 12, "height": 6},
+              row_limit=20),
+
+        # ─── Row 8 (height 3): non-success outcomes ──────────────────────
+        line_over_time("Non-success worker outcomes over 7d, per status",
                        f"{INV} AND NOT cf_worker_status:success",
                        series=[("requests", "sum(cf_worker_requests)")],
                        column_field="cf_worker_status", column_limit=8,
-                       pos={"col": 1, "row": 19, "width": 12, "height": 4},
+                       pos={"col": 1, "row": 25, "width": 12, "height": 3},
                        timerange=WEEK),
-
-        # ─── Per-call detail from Workers Analytics Engine ─────────────
-        # (worker writes one datapoint per CMA session turn — the
-        # poller pulls via AE SQL once per cycle; row count = unique
-        # (model, surface, tool, session, stop_reason) combos.)
-        # Token values are CUMULATIVE per session; latest() captures
-        # final session state; sum-of-max-per-session = day total.
-        numeric("Active sessions (24h)",
-                "cf_event_type:anthropic_call",
-                "cardinality(ant_session_id)",
-                pos={"col": 1, "row": 23, "width": 3, "height": 2}, name="sess"),
-        numeric("Total in-tokens (24h)",
-                "cf_event_type:anthropic_call",
-                "sum(ant_input_tokens)",
-                pos={"col": 4, "row": 23, "width": 3, "height": 2}, name="tok"),
-        numeric("Total out-tokens (24h)",
-                "cf_event_type:anthropic_call",
-                "sum(ant_output_tokens)",
-                pos={"col": 7, "row": 23, "width": 3, "height": 2}, name="tok"),
-        numeric("Avg session latency ms (24h)",
-                "cf_event_type:anthropic_call",
-                "avg(ant_avg_latency_ms)",
-                pos={"col": 10, "row": 23, "width": 3, "height": 2}, name="ms"),
-
-        # Per-surface call mix + latency
-        pie("Calls by surface (24h)",
-            "cf_event_type:anthropic_call",
-            field="ant_surface",
-            pos={"col": 1, "row": 25, "width": 4, "height": 4}),
-        pie("Stop-reason mix (24h)",
-            "cf_event_type:anthropic_call",
-            field="ant_stop_reason",
-            pos={"col": 5, "row": 25, "width": 4, "height": 4}),
-        pie("Top tools fired (24h)",
-            'cf_event_type:anthropic_call AND NOT ant_tool:"(none)"',
-            field="ant_tool",
-            pos={"col": 9, "row": 25, "width": 4, "height": 4}),
-
-        # Per-surface table — sessions, tokens, latency
-        table("Per-surface usage (24h)",
-              "cf_event_type:anthropic_call",
-              row_field="ant_surface",
-              series=[("sessions",  "cardinality(ant_session_id)"),
-                      ("in tokens", "sum(ant_input_tokens)"),
-                      ("out tokens","sum(ant_output_tokens)"),
-                      ("avg ms",    "avg(ant_avg_latency_ms)"),
-                      ("max ms",    "max(ant_max_latency_ms)")],
-              pos={"col": 1, "row": 29, "width": 12, "height": 4}, row_limit=10),
-
-        # Per-model table — useful once multiple models in play
-        table("Per-model usage (24h)",
-              "cf_event_type:anthropic_call",
-              row_field="ant_model",
-              series=[("sessions",  "cardinality(ant_session_id)"),
-                      ("in tokens", "sum(ant_input_tokens)"),
-                      ("out tokens","sum(ant_output_tokens)"),
-                      ("avg ms",    "avg(ant_avg_latency_ms)")],
-              pos={"col": 1, "row": 33, "width": 12, "height": 4}, row_limit=10),
-
-        # Top sessions by output token usage
-        table("Top sessions by output tokens (24h)",
-              "cf_event_type:anthropic_call",
-              row_field="ant_session_id",
-              series=[("model",       "latest(ant_model)"),
-                      ("surface",     "latest(ant_surface)"),
-                      ("tool",        "latest(ant_tool)"),
-                      ("in tokens",   "latest(ant_input_tokens)"),
-                      ("out tokens",  "latest(ant_output_tokens)"),
-                      ("cache read",  "latest(ant_cache_read_tokens)"),
-                      ("stop",        "latest(ant_stop_reason)"),
-                      ("avg ms",      "latest(ant_avg_latency_ms)")],
-              pos={"col": 1, "row": 37, "width": 12, "height": 6}, row_limit=25),
     ]
 
 
