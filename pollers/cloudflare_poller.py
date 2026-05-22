@@ -770,6 +770,10 @@ def poll_workers_ae(state: dict) -> None:
         return
     acct_id = accounts[0]["id"]
 
+    # blob6 = worker name (darknetian-bookings / darknetian-morpheus / …).
+    # Older rows from bookings (written before the snippet adopted blob6)
+    # have blob6 = "" — coalesce to "bookings" so they don't fall into a
+    # ghost "" group; downstream dashboards filter on ant_worker.
     sql = (
         "SELECT "
         "blob1 AS model, "
@@ -777,6 +781,7 @@ def poll_workers_ae(state: dict) -> None:
         "blob3 AS tool, "
         "blob4 AS session_id, "
         "blob5 AS stop_reason, "
+        "if(empty(blob6), 'bookings', blob6) AS worker, "
         "SUM(_sample_interval * double1) AS input_tokens, "
         "SUM(_sample_interval * double2) AS output_tokens, "
         "SUM(_sample_interval * double3) AS cache_read, "
@@ -787,7 +792,7 @@ def poll_workers_ae(state: dict) -> None:
         "MAX(timestamp) AS last_seen "
         "FROM anthropic_calls "
         "WHERE timestamp > NOW() - INTERVAL '24' HOUR "
-        "GROUP BY blob1, blob2, blob3, blob4, blob5 "
+        "GROUP BY blob1, blob2, blob3, blob4, blob5, worker "
         "FORMAT JSON"
     )
     url = f"https://api.cloudflare.com/client/v4/accounts/{acct_id}/analytics_engine/sql"
@@ -817,8 +822,8 @@ def poll_workers_ae(state: dict) -> None:
     if budget_just_set:
         baseline: dict[str, dict] = {}
         for r in rows:
-            sid = r.get("session_id") or ""
-            baseline[sid] = {
+            sid_key = f"{r.get('worker') or 'bookings'}:{r.get('session_id') or ''}"
+            baseline[sid_key] = {
                 "in":  int(r.get("input_tokens") or 0),
                 "out": int(r.get("output_tokens") or 0),
                 "cr":  int(r.get("cache_read") or 0),
@@ -857,22 +862,27 @@ def poll_workers_ae(state: dict) -> None:
         except Exception:
             ts = None
 
-        sid = r.get("session_id") or ""
+        worker = r.get("worker") or "bookings"
+        sid_raw = r.get("session_id") or ""
+        # Namespace state by worker so morpheus + bookings can't collide
+        # if (extremely unlikely) they ever happen to mint the same
+        # session id literal.
+        sid_key = f"{worker}:{sid_raw}"
         cur = {
             "in":  int(r.get("input_tokens") or 0),
             "out": int(r.get("output_tokens") or 0),
             "cr":  int(r.get("cache_read") or 0),
             "cc":  int(r.get("cache_create") or 0),
         }
-        new_seen[sid] = cur
+        new_seen[sid_key] = cur
 
-        last = seen.get(sid) or {"in": 0, "out": 0, "cr": 0, "cc": 0}
+        last = seen.get(sid_key) or {"in": 0, "out": 0, "cr": 0, "cc": 0}
         delta = {k: max(0, cur[k] - last[k]) for k in cur}
         # If nothing new for a session we've already seen, skip — avoids
         # re-emitting cumulative totals on every poll (which would
         # inflate sum() widgets). First-time observations: delta = full
         # cumulative, which is correct.
-        if sid in seen and sum(delta.values()) == 0:
+        if sid_key in seen and sum(delta.values()) == 0:
             continue
 
         model = r.get("model") or ""
@@ -881,17 +891,18 @@ def poll_workers_ae(state: dict) -> None:
         total_usd_delta += usd_delta
 
         gelf(
-            f"AE {model} {r.get('surface','?')} "
-            f"{(r.get('tool') or '(none)')} sess={sid[:14]}.. "
+            f"AE {worker} {model} {r.get('surface','?')} "
+            f"{(r.get('tool') or '(none)')} sess={sid_raw[:14]}.. "
             f"Δin={delta['in']} Δout={delta['out']} "
             f"${usd_delta:.4f} ms={r.get('avg_latency_ms') or 0:.0f}",
-            host="cloudflare-anthropic",
+            host=f"cloudflare-worker-darknetian-{worker}",
             timestamp=ts,
             cf_event_type="anthropic_call",
+            ant_worker=worker,
             ant_model=model,
             ant_surface=r.get("surface"),
             ant_tool=r.get("tool") or "(none)",
-            ant_session_id=sid,
+            ant_session_id=sid_raw,
             ant_stop_reason=r.get("stop_reason"),
             # Cumulative (for latest()-per-session widgets)
             ant_input_tokens=cur["in"],

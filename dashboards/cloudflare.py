@@ -553,8 +553,7 @@ def build():
         ("Traffic", page_traffic, DAY),
         ("Threats", page_threats, DAY),
         ("DNS & Audit", page_dns_audit, WEEK),
-        ("Agents", page_agents, WEEK),
-        ("Anthropic", page_anthropic, WEEK),
+        # Agents + Anthropic moved to dashboards/agents.py
     ]
     pages_for_search: list[dict] = []
     pages_for_view: list[dict] = []
