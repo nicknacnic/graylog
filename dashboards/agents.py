@@ -193,7 +193,7 @@ def _worker_page(worker: str):
                    name="book")]
           if worker == "bookings" else
           [numeric("Verifications (24h)",
-                   f'{AE} AND ant_tool:(dcv OR tlsa OR dnssec_chain OR did_web_resolve OR well_known_agent_card)',
+                   f'{AE} AND ant_tool:(dcv OR tlsa OR tls_handshake_audit OR dnssec_chain OR did_web_resolve OR well_known_agent_card)',
                    "cardinality(ant_session_id)",
                    pos={"col": 1, "row": 1, "width": 2, "height": 2},
                    name="verify")]),
