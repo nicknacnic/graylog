@@ -792,6 +792,7 @@ def poll_workers_ae(state: dict) -> None:
         "MAX(timestamp) AS last_seen "
         "FROM anthropic_calls "
         "WHERE timestamp > NOW() - INTERVAL '24' HOUR "
+        "  AND NOT startsWith(blob1, '_event:') "  # exclude sentinel events (DCV, etc.)
         "GROUP BY blob1, blob2, blob3, blob4, blob5, worker "
         "FORMAT JSON"
     )
@@ -944,6 +945,89 @@ def poll_workers_ae(state: dict) -> None:
         )
 
 
+def poll_morpheus_dcv() -> None:
+    """Morpheus emits a dedicated AE write each time runDcvVerifyChallenge
+    finishes (success OR failure). Uses a sentinel marker in blob1 so
+    the rows can be filtered out from the regular per-call telemetry.
+
+    Schema (worker-side, must stay in sync):
+      blob1 = "_event:dcv_verify"  (sentinel)
+      blob2 = domain               (the zone being verified)
+      blob3 = result               ("pass" | "token_not_found" |
+                                   "no_pending_challenge" | "expired" |
+                                   "ad_flag_missing" | "doh_error")
+      blob4 = session_id
+      blob5 = (unused)
+      blob6 = "morpheus"
+      double1 = latency_ms (DoH query time)
+    """
+    try:
+        accounts = (cf_get("/accounts") or {}).get("result") or []
+    except error.HTTPError as e:
+        if e.code in (401, 403):
+            return
+        raise
+    if not accounts:
+        return
+    acct_id = accounts[0]["id"]
+
+    sql = (
+        "SELECT "
+        "blob2 AS domain, "
+        "blob3 AS result, "
+        "blob4 AS session_id, "
+        "COUNT() AS samples, "
+        "AVG(double1) AS avg_latency_ms, "
+        "MAX(timestamp) AS last_seen "
+        "FROM anthropic_calls "
+        "WHERE timestamp > NOW() - INTERVAL '24' HOUR "
+        "  AND blob1 = '_event:dcv_verify' "
+        "  AND blob6 = 'morpheus' "
+        "GROUP BY blob2, blob3, blob4 "
+        "ORDER BY last_seen DESC "
+        "FORMAT JSON"
+    )
+    url = f"https://api.cloudflare.com/client/v4/accounts/{acct_id}/analytics_engine/sql"
+    req = request.Request(url, data=sql.encode(), headers={
+        "Authorization": f"Bearer {CF_API_TOKEN}",
+        "Content-Type": "text/plain",
+    })
+    try:
+        with request.urlopen(req, timeout=30) as r:
+            body = json.loads(r.read())
+    except error.HTTPError as e:
+        snippet = e.read().decode("utf-8", "replace")[:200]
+        print(f"AE DCV SQL error {e.code}: {snippet}", file=sys.stderr)
+        return
+
+    rows = body.get("data") or []
+    for r in rows:
+        ts = None
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            ls = r.get("last_seen") or ""
+            if ls:
+                ts = _dt.strptime(ls, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_tz.utc).timestamp()
+        except Exception:
+            ts = None
+        domain = r.get("domain") or "(unknown)"
+        result = r.get("result") or "(unknown)"
+        gelf(
+            f"DCV {result} {domain} sess={(r.get('session_id') or '')[:14]}..",
+            host="cloudflare-worker-darknetian-morpheus",
+            timestamp=ts,
+            cf_event_type="morpheus_dcv_verify",
+            ant_worker="morpheus",
+            morpheus_dcv_domain=domain,
+            morpheus_dcv_result=result,
+            morpheus_dcv_pass="true" if result == "pass" else "false",
+            ant_session_id=r.get("session_id"),
+            ant_avg_latency_ms=r.get("avg_latency_ms"),
+            ant_samples=r.get("samples"),
+            ant_last_seen=r.get("last_seen"),
+        )
+
+
 def poll_audit_logs(start: str, state: dict) -> None:
     """Account-level audit events (config changes). Dedupes on event Id.
 
@@ -1027,6 +1111,7 @@ def main() -> None:
     _safe("audit_logs", lambda: poll_audit_logs(start, state))
     _safe("workers_invocations", lambda: poll_workers_invocations(start, end))
     _safe("workers_ae",          lambda: poll_workers_ae(state))
+    _safe("morpheus_dcv",        lambda: poll_morpheus_dcv())
     save_state(state)
     print("done.")
 

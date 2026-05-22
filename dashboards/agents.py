@@ -288,6 +288,55 @@ def _worker_page(worker: str):
                 column_field="cf_worker_status", column_limit=8,
                 pos={"col": 1, "row": 25, "width": 12, "height": 3},
                 timerange=WEEK),
+
+        # ─── Row 9 (morpheus only): DCV-verified domains ───────────────
+        # Each row = one (domain, result) combo from morpheus's
+        # runDcvVerifyChallenge. 'pass' rows are zones the caller has
+        # proven they control via the _agents-challenge TXT — anyone
+        # who's gotten through can read the gated per-finding fix
+        # detail for that domain in their session.
+        *(_dcv_widgets() if worker == "morpheus" else []),
+    ]
+
+
+def _dcv_widgets() -> list[dict]:
+    DCV = "cf_event_type:morpheus_dcv_verify"
+    return [
+        numeric("DCV verifies — passed (24h)",
+                f"{DCV} AND morpheus_dcv_result:pass",
+                "cardinality(morpheus_dcv_domain)",
+                pos={"col": 1, "row": 28, "width": 3, "height": 2},
+                name="domains"),
+        numeric("DCV verifies — total attempts (24h)", DCV, "count()",
+                pos={"col": 4, "row": 28, "width": 3, "height": 2},
+                name="attempts"),
+        numeric("DCV failures (24h)",
+                f"{DCV} AND NOT morpheus_dcv_result:pass",
+                "count()",
+                pos={"col": 7, "row": 28, "width": 3, "height": 2},
+                name="fail"),
+        numeric("Avg verify latency ms (24h)", DCV,
+                "avg(ant_avg_latency_ms)",
+                pos={"col": 10, "row": 28, "width": 3, "height": 2},
+                name="ms"),
+        # The headline widget — exact domains that have passed DCV.
+        table("Domains that passed DCV (24h)",
+              f"{DCV} AND morpheus_dcv_result:pass",
+              row_field="morpheus_dcv_domain",
+              series=[("verifications", "count()"),
+                      ("sessions",      "cardinality(ant_session_id)"),
+                      ("last seen",     "latest(ant_last_seen)"),
+                      ("avg ms",        "avg(ant_avg_latency_ms)")],
+              pos={"col": 1, "row": 30, "width": 6, "height": 6},
+              row_limit=50),
+        # Failure breakdown — why DCV didn't pass for someone trying.
+        table("DCV failures by reason (24h)",
+              f"{DCV} AND NOT morpheus_dcv_result:pass",
+              row_field="morpheus_dcv_result",
+              column_field="morpheus_dcv_domain", column_limit=8,
+              series=[("attempts", "count()")],
+              pos={"col": 7, "row": 30, "width": 6, "height": 6},
+              row_limit=15),
     ]
 
 
