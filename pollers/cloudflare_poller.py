@@ -945,6 +945,101 @@ def poll_workers_ae(state: dict) -> None:
         )
 
 
+def poll_morpheus_probes() -> None:
+    """One AE write per probe tool invocation — captures the domain
+    being audited (which the regular per-call telemetry doesn't, since
+    blobs1-5 only carry model/surface/tool/session/stop_reason).
+
+    Worker-side schema (must stay in sync with src/observability):
+      blob1 = "_event:probe"   (sentinel)
+      blob2 = domain           (input.zone / input.host / input.domain)
+      blob3 = probe            ("dns_aid_index" / "tls_handshake_audit" / …)
+      blob4 = session_id
+      blob5 = result_summary   ("pass" | "warn" | "fail" | "error")
+      blob6 = "morpheus"
+      double1 = findings.pass count
+      double2 = findings.warn count
+      double3 = findings.fail count
+      double4 = findings.error count
+      double5 = latency_ms (per-probe wall time)
+    """
+    try:
+        accounts = (cf_get("/accounts") or {}).get("result") or []
+    except error.HTTPError as e:
+        if e.code in (401, 403):
+            return
+        raise
+    if not accounts:
+        return
+    acct_id = accounts[0]["id"]
+
+    sql = (
+        "SELECT "
+        "blob2 AS domain, "
+        "blob3 AS probe, "
+        "blob4 AS session_id, "
+        "blob5 AS result_summary, "
+        "SUM(_sample_interval * double1) AS findings_pass, "
+        "SUM(_sample_interval * double2) AS findings_warn, "
+        "SUM(_sample_interval * double3) AS findings_fail, "
+        "SUM(_sample_interval * double4) AS findings_error, "
+        "AVG(double5) AS avg_latency_ms, "
+        "COUNT() AS invocations, "
+        "MAX(timestamp) AS last_seen "
+        "FROM anthropic_calls "
+        "WHERE timestamp > NOW() - INTERVAL '24' HOUR "
+        "  AND blob1 = '_event:probe' "
+        "  AND blob6 = 'morpheus' "
+        "GROUP BY blob2, blob3, blob4, blob5 "
+        "ORDER BY last_seen DESC "
+        "FORMAT JSON"
+    )
+    url = f"https://api.cloudflare.com/client/v4/accounts/{acct_id}/analytics_engine/sql"
+    req = request.Request(url, data=sql.encode(), headers={
+        "Authorization": f"Bearer {CF_API_TOKEN}",
+        "Content-Type": "text/plain",
+    })
+    try:
+        with request.urlopen(req, timeout=30) as r:
+            body = json.loads(r.read())
+    except error.HTTPError as e:
+        snippet = e.read().decode("utf-8", "replace")[:200]
+        print(f"AE probe SQL error {e.code}: {snippet}", file=sys.stderr)
+        return
+
+    rows = body.get("data") or []
+    for r in rows:
+        ts = None
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            ls = r.get("last_seen") or ""
+            if ls:
+                ts = _dt.strptime(ls, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_tz.utc).timestamp()
+        except Exception:
+            ts = None
+        domain = r.get("domain") or "(unknown)"
+        probe = r.get("probe") or "(unknown)"
+        result = r.get("result_summary") or "(unknown)"
+        gelf(
+            f"PROBE {probe} {domain} → {result}",
+            host="cloudflare-worker-darknetian-morpheus",
+            timestamp=ts,
+            cf_event_type="morpheus_probe",
+            ant_worker="morpheus",
+            morpheus_probe_domain=domain,
+            morpheus_probe_name=probe,
+            morpheus_probe_result=result,
+            morpheus_findings_pass=int(r.get("findings_pass") or 0),
+            morpheus_findings_warn=int(r.get("findings_warn") or 0),
+            morpheus_findings_fail=int(r.get("findings_fail") or 0),
+            morpheus_findings_error=int(r.get("findings_error") or 0),
+            ant_session_id=r.get("session_id"),
+            ant_avg_latency_ms=r.get("avg_latency_ms"),
+            ant_samples=r.get("invocations"),
+            ant_last_seen=r.get("last_seen"),
+        )
+
+
 def poll_morpheus_dcv() -> None:
     """Morpheus emits a dedicated AE write each time runDcvVerifyChallenge
     finishes (success OR failure). Uses a sentinel marker in blob1 so
@@ -1112,6 +1207,7 @@ def main() -> None:
     _safe("workers_invocations", lambda: poll_workers_invocations(start, end))
     _safe("workers_ae",          lambda: poll_workers_ae(state))
     _safe("morpheus_dcv",        lambda: poll_morpheus_dcv())
+    _safe("morpheus_probes",     lambda: poll_morpheus_probes())
     save_state(state)
     print("done.")
 

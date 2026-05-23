@@ -296,6 +296,77 @@ def _worker_page(worker: str):
         # who's gotten through can read the gated per-finding fix
         # detail for that domain in their session.
         *(_dcv_widgets() if worker == "morpheus" else []),
+
+        # ─── Row 10 (morpheus only): every domain audited ──────────────
+        # One row per probe invocation, blob2 carries the input domain
+        # (dns_aid_index({zone}), tls_handshake_audit({host}), etc.).
+        *(_audit_target_widgets() if worker == "morpheus" else []),
+    ]
+
+
+def _audit_target_widgets() -> list[dict]:
+    """Which domains has morpheus audited? Sourced from per-probe AE
+    writes (cf_event_type:morpheus_probe). Each probe tool emits one
+    datapoint per invocation with the domain it was called against,
+    so this section is independent of the regular per-call telemetry."""
+    P = "cf_event_type:morpheus_probe"
+    return [
+        numeric("Distinct domains audited (24h)", P,
+                "cardinality(morpheus_probe_domain)",
+                pos={"col": 1, "row": 36, "width": 3, "height": 2},
+                name="domains"),
+        numeric("Total probes fired (24h)", P,
+                "sum(ant_samples)",
+                pos={"col": 4, "row": 36, "width": 3, "height": 2},
+                name="probes"),
+        numeric("Probes with failures (24h)",
+                f'{P} AND morpheus_probe_result:fail',
+                "count()",
+                pos={"col": 7, "row": 36, "width": 3, "height": 2},
+                name="fail"),
+        numeric("Avg probe latency ms (24h)", P,
+                "avg(ant_avg_latency_ms)",
+                pos={"col": 10, "row": 36, "width": 3, "height": 2},
+                name="ms"),
+
+        # The headline — every domain morpheus has been pointed at.
+        table("Audited domains (24h)", P,
+              row_field="morpheus_probe_domain",
+              series=[("probes",   "sum(ant_samples)"),
+                      ("sessions", "cardinality(ant_session_id)"),
+                      ("✓ pass",   "sum(morpheus_findings_pass)"),
+                      ("⚠ warn",   "sum(morpheus_findings_warn)"),
+                      ("✗ fail",   "sum(morpheus_findings_fail)"),
+                      ("⨯ error",  "sum(morpheus_findings_error)"),
+                      ("avg ms",   "avg(ant_avg_latency_ms)"),
+                      ("last seen","latest(ant_last_seen)")],
+              pos={"col": 1, "row": 38, "width": 12, "height": 6},
+              row_limit=50),
+
+        # Per-domain × per-probe matrix — see which probes ran against
+        # each domain (column_limit=12 covers the morpheus probe set).
+        table("Per-domain probe coverage (24h)", P,
+              row_field="morpheus_probe_domain",
+              column_field="morpheus_probe_name", column_limit=15,
+              series=[("invocations", "sum(ant_samples)")],
+              pos={"col": 1, "row": 44, "width": 12, "height": 6},
+              row_limit=25),
+
+        # Outcome distribution per probe — how often each probe lands
+        # on pass / warn / fail / error across all domains.
+        table("Per-probe outcome mix (24h)", P,
+              row_field="morpheus_probe_name",
+              column_field="morpheus_probe_result", column_limit=6,
+              series=[("invocations", "sum(ant_samples)")],
+              pos={"col": 1, "row": 50, "width": 12, "height": 5},
+              row_limit=20),
+
+        # Recent audits as a message list — chronological feed.
+        {"title": "Recent audits (24h, newest first)",
+         "kind": "messages",
+         "query": P,
+         "timerange": DAY,
+         "pos": {"col": 1, "row": 55, "width": 12, "height": 5}},
     ]
 
 
