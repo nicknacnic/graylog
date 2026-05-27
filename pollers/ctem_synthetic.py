@@ -270,9 +270,15 @@ def peak_burst_count(t: datetime, days_ago: int) -> int:
 
 # ─── Emit ─────────────────────────────────────────────────────────────────
 def emit_one(tpl: T, when: datetime, suffix: str = "") -> bool:
-    if not suffix:
-        suffix = f"{int(when.timestamp())}-{random.randint(0, 9999):04d}"
-    ext_id = f"{tpl.adapter}:{tpl.kind}:{suffix}"
+    # Stable per-template external_id so the dashboard can use
+    # cardinality(external_id) or cardinality(asset) for the headline
+    # "distinct findings" count. The `suffix` arg is honored only when
+    # the caller explicitly wants a unique-per-emission id (story
+    # events use it for traceability).
+    if suffix:
+        ext_id = f"{tpl.adapter}:{tpl.kind}:{suffix}"
+    else:
+        ext_id = f"{tpl.adapter}:{tpl.kind}:{tpl.asset}"
     run_id = "synthetic-" + when.strftime("%Y%m%dT%H")
     payload = {
         "version": "1.1",
