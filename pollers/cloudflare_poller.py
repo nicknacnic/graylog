@@ -504,7 +504,13 @@ AGENT_FQDNS = [
     "_443._tcp.threat-intel.darknetian.com",
     "_443._tcp.dns-audit.darknetian.com",
     "_443._tcp.morpheus.darknetian.com",
-    # org index + canonical endpoint
+    # org index + canonical endpoint. Both forms of the index leaf are
+    # in DNS — `_index._agents` is the canonical -02 name (leading
+    # underscore per the IANA underscored-node-names registration);
+    # `index._agents` is kept as a back-compat alias for clients on
+    # earlier drafts. _agent_name_from_qname() collapses both to
+    # cf_dns_agent="index".
+    "_index._agents.darknetian.com",
     "index._agents.darknetian.com",
     "endpoint.darknetian.com",
     # ANS (Agent Name Service) transparency-log records — added 2026-05-15
