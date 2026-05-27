@@ -782,10 +782,18 @@ def poll_workers_ae(state: dict) -> None:
         "blob4 AS session_id, "
         "blob5 AS stop_reason, "
         "if(empty(blob6), 'bookings', blob6) AS worker, "
-        "SUM(_sample_interval * double1) AS input_tokens, "
-        "SUM(_sample_interval * double2) AS output_tokens, "
-        "SUM(_sample_interval * double3) AS cache_read, "
-        "SUM(_sample_interval * double4) AS cache_create, "
+        # Tokens are CUMULATIVE per CMA session — each writeDataPoint
+        # call records the session's running total to date, NOT the
+        # turn delta. With GROUP BY blob4 (session_id), MAX(doubleN)
+        # = final cumulative for that session. Using SUM here would
+        # compound every prior turn's cumulative into the total
+        # (e.g. cum=[100,250,400] → SUM=750 vs actual=400) and
+        # inflate the USD-spend delta math downstream by ~3-25x
+        # depending on average turns/session.
+        "MAX(double1) AS input_tokens, "
+        "MAX(double2) AS output_tokens, "
+        "MAX(double3) AS cache_read, "
+        "MAX(double4) AS cache_create, "
         "AVG(double5) AS avg_latency_ms, "
         "MAX(double5) AS max_latency_ms, "
         "COUNT() AS samples, "
@@ -1033,9 +1041,13 @@ def poll_morpheus_probes() -> None:
             morpheus_findings_warn=int(r.get("findings_warn") or 0),
             morpheus_findings_fail=int(r.get("findings_fail") or 0),
             morpheus_findings_error=int(r.get("findings_error") or 0),
+            # Renamed from ant_samples — that name was already mapped as
+            # keyword in OpenSearch (stale mapping from earlier event
+            # shapes), which broke sum() on every probe widget. Fresh
+            # name = fresh long mapping.
+            morpheus_probe_count=int(r.get("invocations") or 0),
             ant_session_id=r.get("session_id"),
-            ant_avg_latency_ms=r.get("avg_latency_ms"),
-            ant_samples=r.get("invocations"),
+            morpheus_probe_latency_ms=r.get("avg_latency_ms"),
             ant_last_seen=r.get("last_seen"),
         )
 
