@@ -138,46 +138,54 @@ def msgs(title, query, *, pos, timerange=DAY):
 
 
 def page_top_talkers():
+    # Migrated off the legacy NIOS-syslog field names (dns_event_type,
+    # client_ip, qname, source). NIOS feeds the grid's DNS activity
+    # via dnstap now — fields are dnstap_operation / dns_client_ip /
+    # dns_qname / dnstap_identity. The old fields still exist on
+    # historical messages but values like `dns_event_type:query` no
+    # longer match anything (CLIENT_QUERY / CLIENT_RESPONSE on the
+    # new feed), so every widget on this page rendered 0/blank.
     return [
         # Row 1: headline numerics
-        numeric("Queries (24h)", "dns_event_type:query", "count()",
+        numeric("Queries (24h)", "dnstap_operation:CLIENT_QUERY", "count()",
                 timerange=DAY, pos={"col": 1, "row": 1, "width": 3, "height": 2}, name="q"),
-        numeric("Responses (24h)", "dns_event_type:response", "count()",
+        numeric("Responses (24h)", "dnstap_operation:CLIENT_RESPONSE", "count()",
                 timerange=DAY, pos={"col": 4, "row": 1, "width": 3, "height": 2}, name="r"),
         numeric("Distinct clients (24h)",
-                "_exists_:client_ip", "cardinality(client_ip)",
+                "_exists_:dns_client_ip", "cardinality(dns_client_ip)",
                 timerange=DAY, pos={"col": 7, "row": 1, "width": 3, "height": 2}, name="clients"),
         numeric("Distinct qnames (24h)",
-                "_exists_:qname", "cardinality(qname)",
+                "_exists_:dns_qname", "cardinality(dns_qname)",
                 timerange=DAY, pos={"col": 10, "row": 1, "width": 3, "height": 2}, name="qnames"),
         # Row 2: top clients
         table("Top clients by query count (24h)",
-              "_exists_:qname",
-              row_field="client_ip", row_limit=20,
+              "_exists_:dns_qname",
+              row_field="dns_client_ip", row_limit=20,
               series=[
                   ("queries",   "count()"),
                   ("name",      "latest(client_fqdn)"),
                   ("hostname",  "latest(client_hostname)"),
-                  ("qnames",    "cardinality(qname)"),
+                  ("qnames",    "cardinality(dns_qname)"),
               ],
               pos={"col": 1, "row": 3, "width": 12, "height": 5}),
         # Row 3: top qnames + qtype mix
         table("Top qnames (24h)",
-              "_exists_:qname AND NOT qname:\"\"",
-              row_field="qname", row_limit=20,
+              "_exists_:dns_qname AND NOT dns_qname:\"\"",
+              row_field="dns_qname", row_limit=20,
               series=[
                   ("queries", "count()"),
-                  ("clients", "cardinality(client_ip)"),
+                  ("clients", "cardinality(dns_client_ip)"),
               ],
               pos={"col": 1, "row": 8, "width": 8, "height": 5}),
         pie("Query types (24h)",
-            "_exists_:qtype", field="qtype",
+            "_exists_:dns_qtype", field="dns_qtype",
             pos={"col": 9, "row": 8, "width": 4, "height": 5}),
-        # Row 4: client_hostname enrichment effectiveness + qname per source
+        # Row 4: per-NIOS-member split via dnstap_identity (was `source`
+        # on the syslog feed).
         line_ts("Queries per NIOS server (24h)",
-                "dns_event_type:query",
+                "dnstap_operation:CLIENT_QUERY",
                 series=[("count", "count()")],
-                column_field="source",
+                column_field="dnstap_identity",
                 pos={"col": 1, "row": 13, "width": 12, "height": 4}),
     ]
 
@@ -257,14 +265,62 @@ def page_anomalies():
                   ("uniq_qnames", "cardinality(qname)"),
               ],
               pos={"col": 1, "row": 8, "width": 12, "height": 5}),
-        # Row 4: oddities (BADCOOKIE etc — observed in your data)
-        bar("Unusual rcodes (24h, excl. NOERROR/NXDOMAIN)",
-            "_exists_:rcode AND NOT rcode:NOERROR AND NOT rcode:NXDOMAIN AND NOT rcode:SERVFAIL",
-            field="rcode",
+        # Row 4: oddities (REFUSED, BADCOOKIE etc). `rcode` was the
+        # legacy NIOS-syslog field; dnstap exposes it as `dns_rcode`.
+        bar("Unusual rcodes (24h, excl. NOERROR/NXDOMAIN/SERVFAIL)",
+            "_exists_:dns_rcode AND NOT dns_rcode:\"-\" AND NOT dns_rcode:NOERROR AND NOT dns_rcode:NXDOMAIN AND NOT dns_rcode:SERVFAIL",
+            field="dns_rcode",
             pos={"col": 1, "row": 13, "width": 6, "height": 4}),
         msgs("Unusual rcode messages (24h)",
-             "_exists_:rcode AND NOT rcode:NOERROR AND NOT rcode:NXDOMAIN AND NOT rcode:SERVFAIL",
+             "_exists_:dns_rcode AND NOT dns_rcode:\"-\" AND NOT dns_rcode:NOERROR AND NOT dns_rcode:NXDOMAIN AND NOT dns_rcode:SERVFAIL",
              timerange=DAY, pos={"col": 7, "row": 13, "width": 6, "height": 4}),
+        # Row 5: queries without responses — visual gap = unanswered.
+        # In normal operation Q and R lines overlay almost exactly;
+        # divergence (queries spike without matching responses) flags
+        # NIOS dropping queries, dnstap socket backpressure on the
+        # response side, or ACL-denied queries that get silently
+        # dropped. Steady-state loss ~0.2% on this grid.
+        line_ts("CLIENT_QUERY vs CLIENT_RESPONSE (24h, gap = unanswered)",
+                "dnstap_operation:(CLIENT_QUERY OR CLIENT_RESPONSE)",
+                series=[("count", "count()")],
+                column_field="dnstap_operation",
+                pos={"col": 1, "row": 17, "width": 12, "height": 4}),
+        # Row 6: stateful Q↔R join from pollers/dnstap_unanswered.py.
+        # That poller runs every minute, joins on the 4-tuple
+        # (dnstap_identity, dns_client_ip, dns_query_port, dns_id), and
+        # emits one dnstap_event:unanswered_query for each orphan.
+        # Widgets here surface those orphans directly so you don't
+        # have to eyeball the line_ts gap.
+        numeric("Unanswered queries (24h)",
+                "dnstap_event:unanswered_query", "count()",
+                timerange=DAY,
+                pos={"col": 1, "row": 21, "width": 3, "height": 2}, name="orphans"),
+        numeric("Distinct unanswered clients (24h)",
+                "dnstap_event:unanswered_query", "cardinality(dns_client_ip)",
+                timerange=DAY,
+                pos={"col": 4, "row": 21, "width": 3, "height": 2}, name="clients"),
+        numeric("Distinct unanswered qnames (24h)",
+                "dnstap_event:unanswered_query", "cardinality(dns_qname)",
+                timerange=DAY,
+                pos={"col": 7, "row": 21, "width": 3, "height": 2}, name="qnames"),
+        numeric("Unanswered rate /hr (24h)",
+                "dnstap_event:unanswered_query", "count()",
+                timerange=3600,
+                pos={"col": 10, "row": 21, "width": 3, "height": 2}, name="rate"),
+        line_ts("Unanswered queries by grid member (24h)",
+                "dnstap_event:unanswered_query",
+                series=[("count", "count()")],
+                column_field="dnstap_identity",
+                pos={"col": 1, "row": 23, "width": 12, "height": 4}),
+        table("Top unanswered qnames (24h)",
+              "dnstap_event:unanswered_query",
+              row_field="dns_qname", row_limit=20,
+              series=[
+                  ("orphans", "count()"),
+                  ("clients", "cardinality(dns_client_ip)"),
+                  ("via",     "latest(dnstap_identity)"),
+              ],
+              pos={"col": 1, "row": 27, "width": 12, "height": 5}),
     ]
 
 
@@ -400,10 +456,16 @@ def page_auth_dns():
       dns_qname / dns_qtype / dns_rcode / dns_client_ip
     `Auth` here means qname inside the AUTH_ZONE NIOS is authoritative
     for. Everything else NIOS handles is on the Recursive DNS page."""
+    # `dns_qname:*.{AUTH_ZONE}` (leading wildcard) is rejected by
+    # OpenSearch's default search.allow_leading_wildcard=false — the
+    # entire query fails to parse and every widget on this page returns
+    # "all shards failed". Use a regex match on the subdomain form
+    # instead; the exact-name half stays as a literal.
+    AUTH_ZONE_RE = AUTH_ZONE.replace(".", r"\.")
     CQ_AUTH = (f'dnstap_operation:CLIENT_QUERY AND '
-               f'(dns_qname:{AUTH_ZONE} OR dns_qname:*.{AUTH_ZONE})')
+               f'(dns_qname:{AUTH_ZONE} OR dns_qname:/.+\\.{AUTH_ZONE_RE}/)')
     CR_AUTH = (f'dnstap_operation:CLIENT_RESPONSE AND '
-               f'(dns_qname:{AUTH_ZONE} OR dns_qname:*.{AUTH_ZONE})')
+               f'(dns_qname:{AUTH_ZONE} OR dns_qname:/.+\\.{AUTH_ZONE_RE}/)')
     return [
         # Row 1: auth-specific headline numerics
         numeric("Auth queries (24h)", CQ_AUTH, "count()", timerange=DAY,
@@ -881,9 +943,14 @@ def build():
 
     # page_defs: (title, build_fn, default_timerange, streams_override)
     page_defs = [
-        ("Top talkers",     page_top_talkers,    DAY, None),
+        ("Top talkers",     page_top_talkers,    DAY, [DNSTAP_STREAM]),
         ("DNS health",      page_health,         DAY, None),
-        ("Anomalies",       page_anomalies,      DAY, None),
+        # Anomalies blends legacy NIOS-syslog widgets (PTR/AAAA/SVCB
+        # qtype numerics, top NX qnames/clients via `qname`/`client_ip`)
+        # with dnstap-side widgets (unusual rcodes via dns_rcode, Q vs R
+        # divergence via dnstap_operation). Needs both stream sets —
+        # the default ALL_DDI_STREAMS doesn't include dnstap.
+        ("Anomalies",       page_anomalies,      DAY, ALL_DDI_STREAMS + [DNSTAP_STREAM]),
         ("Auth DNS",        page_auth_dns,       DAY, [DNSTAP_STREAM]),
         ("Recursive DNS",   page_recursive_dns,  DAY, [DNSTAP_STREAM, UDDI_STREAM]),
         ("DHCP",            page_dhcp,           DAY, [NIOS_DHCP_STREAM]),
