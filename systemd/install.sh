@@ -375,6 +375,46 @@ install_ctem_synthetic() {
 
 install_ctem_synthetic
 
+# dnstap unanswered-query detector — joins CLIENT_QUERY rows against
+# CLIENT_RESPONSE rows on a 4-tuple key (identity, client_ip, port,
+# dns_id) and emits one GELF per orphan. Same single-unit shape as
+# cf-poller.
+install_dnstap_unanswered() {
+  local user=dnstap-unanswered
+  local src=pollers/dnstap_unanswered.py
+
+  if [[ ! -f "$src" ]]; then
+    echo "skip dnstap-unanswered (no $src in repo)"
+    return
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  fi
+  install -d -o root -g root -m 0755 /opt/dnstap-unanswered
+  install -m 0755 "$src" /opt/dnstap-unanswered/
+  install -d -o root -g "$user" -m 0750 /etc/dnstap-unanswered
+  if [[ ! -f /etc/dnstap-unanswered/env ]]; then
+    cat > /etc/dnstap-unanswered/env <<'EOF'
+# Graylog API endpoint + token. The token only needs read access on
+# the dnstap stream and ability to call /search/universal/absolute.
+GRAYLOG_URL=https://graylog.darknetian.com/api
+GRAYLOG_TOKEN=
+GELF_URL=http://127.0.0.1:12202/gelf
+# Optional overrides:
+# DNSTAP_STREAM=6a0b235712e68f7f742811ec
+# WINDOW_START_S=30      # grace for in-flight responses
+# WINDOW_END_S=90        # window is [now-END, now-START]
+EOF
+    chmod 0640 /etc/dnstap-unanswered/env
+    chown root:"$user" /etc/dnstap-unanswered/env
+    echo "NOTE: edit /etc/dnstap-unanswered/env to add GRAYLOG_TOKEN"
+  fi
+  install -m 0644 systemd/dnstap-unanswered.service /etc/systemd/system/
+  install -m 0644 systemd/dnstap-unanswered.timer   /etc/systemd/system/
+}
+
+install_dnstap_unanswered
+
 # Auto-rotate watchdog: watches Graylog's indexer-failures count and
 # rotates the offending index set when it spikes. Same single-unit
 # shape as cf-poller.

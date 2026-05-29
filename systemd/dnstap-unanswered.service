@@ -1,0 +1,22 @@
+[Unit]
+Description=Detect dnstap CLIENT_QUERYs without matching CLIENT_RESPONSE
+After=network-online.target graylog-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=dnstap-unanswered
+Group=dnstap-unanswered
+EnvironmentFile=/etc/dnstap-unanswered/env
+ExecStart=/usr/bin/python3 /opt/dnstap-unanswered/dnstap_unanswered.py
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
