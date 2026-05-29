@@ -12,8 +12,9 @@ strip):
     ha_thread    MainThread | SyncWorker_N | ...
     ha_traceback (only present for entries with continuation lines)
 
-No dedicated stream yet — WARN+ is low volume, so it rides the default
-All-Messages stream filtered by source.
+Dedicated 'Home Assistant' stream + 'home_assistant_*' index — see
+indexing/ha.py. The source-filter is kept in BASE_QUERY for clarity
+even though the stream rule already does it.
 """
 
 from __future__ import annotations
@@ -24,8 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import graylog as gl  # noqa: E402
 
-# All-Messages stream — every Graylog ships with this id.
-DEFAULT_STREAM_ID = "000000000000000000000001"
+HA_STREAM_TITLE = "Home Assistant"
 SOURCE = "ha-darknetian"
 BASE_QUERY = f'source:"{SOURCE}"'
 
@@ -158,10 +158,18 @@ def page_main():
     ]
 
 
+def _resolve_stream_id(title: str) -> str:
+    for s in (gl.api("GET", "streams") or {}).get("streams", []):
+        if s.get("title") == title:
+            return s["id"]
+    raise RuntimeError(f"stream not found: {title!r} (run indexing/ha.py first)")
+
+
 def build():
     qid = gl.gen_id()
+    stream_id = _resolve_stream_id(HA_STREAM_TITLE)
     sts, ws, pos, ti, wm = gl.build_widgets_for_page(
-        DEFAULT_STREAM_ID, page_main(), DAY)
+        stream_id, page_main(), DAY)
 
     existing = gl.api("GET", "views?per_page=200") or {}
     for v in existing.get("views", []):

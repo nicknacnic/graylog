@@ -72,6 +72,8 @@ STEPS = [
          ["python3", "indexing/csp.py"]),
     step("indexing", "NIOS dnstap index set + stream (per-query GELF via dnscollector bridge)",
          ["python3", "indexing/nios_dnstap.py"]),
+    step("indexing", "Home Assistant index set + stream (WARN+ logs from ha-log-poller)",
+         ["python3", "indexing/ha.py"]),
 
     # ── 2. Inputs ──────────────────────────────────────────────────────────
     step("inputs", "GELF HTTP input on 127.0.0.1:12202 (for iLO poller)",

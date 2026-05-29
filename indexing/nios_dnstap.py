@@ -98,9 +98,11 @@ def create_stream(index_set_id: str) -> str:
         "index_set_id": index_set_id,
         "remove_matches_from_default_stream": True,
         "rules": [
-            # Exact match on source.
-            {"field": "source", "type": 1, "value": "nios-dnstap",
-             "inverted": False, "description": "bridge source label"},
+            # Regex prefix so the bridge AND the unanswered-query
+            # poller (source=nios-dnstap-unanswered) both land here.
+            {"field": "source", "type": 2, "value": "^nios-dnstap",
+             "inverted": False,
+             "description": "bridge source label + nios-dnstap-* siblings"},
         ],
         "matching_type": "AND",
     }
