@@ -74,6 +74,8 @@ STEPS = [
          ["python3", "indexing/nios_dnstap.py"]),
     step("indexing", "Home Assistant index set + stream (WARN+ logs from ha-log-poller)",
          ["python3", "indexing/ha.py"]),
+    step("indexing", "vLLM Calls index set + stream (per-call telemetry from atlas judge nodes)",
+         ["python3", "indexing/vllm_calls.py"]),
 
     # ── 2. Inputs ──────────────────────────────────────────────────────────
     step("inputs", "GELF HTTP input on 127.0.0.1:12202 (for iLO poller)",
@@ -133,6 +135,8 @@ STEPS = [
          ["python3", "dashboards/synology.py"]),
     step("dashboards", "Home Assistant — logs",
          ["python3", "dashboards/ha_logs.py"]),
+    step("dashboards", "vLLM Calls — per-call telemetry from atlas judge nodes",
+         ["python3", "dashboards/vllm_calls.py"]),
 ]
 
 
