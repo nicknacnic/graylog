@@ -10,6 +10,812 @@
         "x": 0,
         "y": 0
       },
+      "id": 310,
+      "panels": [],
+      "title": "Assumptions \u2014 the estimates below are only as good as these",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Static input to every estimate on this dashboard. Served from a gauge in /etc/n8n-exporter.env -- change it there and every tile below re-derives. No panel hardcodes these values. Words/min for prose-like output: file reads, web fetches, search results.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#8e8e8e",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#8e8e8e",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      },
+      "id": 300,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "atlas_productivity_read_wpm",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Reading speed",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Static input to every estimate on this dashboard. Served from a gauge in /etc/n8n-exporter.env -- change it there and every tile below re-derives. No panel hardcodes these values. Words/min for command output (Bash/Grep/Glob) -- scanned for the failure line, not read. ~54% of all consumed characters, so this rate matters more than the reading one.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#8e8e8e",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#8e8e8e",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 1
+      },
+      "id": 301,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "atlas_productivity_skim_wpm",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Skim speed",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Static input to every estimate on this dashboard. Served from a gauge in /etc/n8n-exporter.env -- change it there and every tile below re-derives. No panel hardcodes these values. Words/min a human writes prose. Values vLLM completion tokens.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#8e8e8e",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#8e8e8e",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 1
+      },
+      "id": 302,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "atlas_productivity_write_wpm",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Writing speed",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Static input to every estimate on this dashboard. Served from a gauge in /etc/n8n-exporter.env -- change it there and every tile below re-derives. No panel hardcodes these values. Lines of file content a human authors per hour, including design and review. This single number dominates the Claude Code value estimate.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#8e8e8e",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#8e8e8e",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 9,
+        "y": 1
+      },
+      "id": 303,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "atlas_productivity_lines_per_hour",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Authoring rate",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Static input to every estimate on this dashboard. Served from a gauge in /etc/n8n-exporter.env -- change it there and every tile below re-derives. No panel hardcodes these values. Words per LLM token. Applies to the vLLM side only, where work is measured in tokens.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#8e8e8e",
+            "mode": "fixed"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#8e8e8e",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 1
+      },
+      "id": 304,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "atlas_productivity_words_per_token",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Words per token",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Static input to every estimate on this dashboard. Served from a gauge in /etc/n8n-exporter.env -- change it there and every tile below re-derives. No panel hardcodes these values. Characters per word, converting measured transcript characters into words.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#8e8e8e",
+            "mode": "fixed"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#8e8e8e",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 1
+      },
+      "id": 305,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "atlas_productivity_chars_per_word",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Chars per word",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Static input to every estimate on this dashboard. Served from a gauge in /etc/n8n-exporter.env -- change it there and every tile below re-derives. No panel hardcodes these values. Working hours per day, used to express the headline in days rather than hours.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#8e8e8e",
+            "mode": "fixed"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#8e8e8e",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "id": 306,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "atlas_productivity_hours_per_day",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Hours per day",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Static input to every estimate on this dashboard. Served from a gauge in /etc/n8n-exporter.env -- change it there and every tile below re-derives. No panel hardcodes these values. Fully loaded hourly cost of the human whose time is being saved.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#8e8e8e",
+            "mode": "fixed"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#8e8e8e",
+                "value": null
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "id": 307,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "atlas_productivity_rate_usd_per_hour",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Loaded labor rate",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 311,
+      "panels": [],
+      "title": "All-time total \u2014 vLLM judgment work + Claude Code build work",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "ALL-TIME, both systems combined, ignoring the time picker. vLLM (hermes judges classifying text) valued via tokens->words->reading/writing time; Claude Code valued via lines authored plus output consumed. Different units of work, both converted to human-equivalent time, then summed. vLLM history begins 2026-08-03 (n8n retention); Claude Code begins 2026-07-09.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#2a78d6",
+            "mode": "fixed"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#2a78d6",
+                "value": null
+              }
+            ]
+          },
+          "unit": "d"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
+      "id": 320,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "((((sum(atlas_vllm_prompt_tokens_total{job=\"atlas-n8n\"}) * scalar(atlas_productivity_words_per_token) / scalar(atlas_productivity_read_wpm) / 60) + (sum(atlas_vllm_completion_tokens_total{job=\"atlas-n8n\"}) * scalar(atlas_productivity_words_per_token) / scalar(atlas_productivity_write_wpm) / 60)) + ((sum(claude_lines_produced{kind=~\"written|added\"}) / scalar(atlas_productivity_lines_per_hour)) + ((sum(claude_chars_consumed{mode=\"read\"}) / scalar(atlas_productivity_chars_per_word) / scalar(atlas_productivity_read_wpm) / 60) + (sum(claude_chars_consumed{mode=\"skim\"}) / scalar(atlas_productivity_chars_per_word) / scalar(atlas_productivity_skim_wpm) / 60)))) / scalar(atlas_productivity_hours_per_day))",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Total days saved",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "ALL-TIME, both systems combined, ignoring the time picker. vLLM (hermes judges classifying text) valued via tokens->words->reading/writing time; Claude Code valued via lines authored plus output consumed. Different units of work, both converted to human-equivalent time, then summed. vLLM history begins 2026-08-03 (n8n retention); Claude Code begins 2026-07-09.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#008300",
+            "mode": "fixed"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#008300",
+                "value": null
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 6
+      },
+      "id": 321,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "((((sum(atlas_vllm_prompt_tokens_total{job=\"atlas-n8n\"}) * scalar(atlas_productivity_words_per_token) / scalar(atlas_productivity_read_wpm) / 60) + (sum(atlas_vllm_completion_tokens_total{job=\"atlas-n8n\"}) * scalar(atlas_productivity_words_per_token) / scalar(atlas_productivity_write_wpm) / 60)) + ((sum(claude_lines_produced{kind=~\"written|added\"}) / scalar(atlas_productivity_lines_per_hour)) + ((sum(claude_chars_consumed{mode=\"read\"}) / scalar(atlas_productivity_chars_per_word) / scalar(atlas_productivity_read_wpm) / 60) + (sum(claude_chars_consumed{mode=\"skim\"}) / scalar(atlas_productivity_chars_per_word) / scalar(atlas_productivity_skim_wpm) / 60)))) * scalar(atlas_productivity_rate_usd_per_hour))",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Total value",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Judgment work only: the hermes classify/triage/assess workflows. ALL-TIME, both systems combined, ignoring the time picker. vLLM (hermes judges classifying text) valued via tokens->words->reading/writing time; Claude Code valued via lines authored plus output consumed. Different units of work, both converted to human-equivalent time, then summed. vLLM history begins 2026-08-03 (n8n retention); Claude Code begins 2026-07-09.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#eda100",
+            "mode": "fixed"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#eda100",
+                "value": null
+              }
+            ]
+          },
+          "unit": "d"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 6
+      },
+      "id": 322,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "(((sum(atlas_vllm_prompt_tokens_total{job=\"atlas-n8n\"}) * scalar(atlas_productivity_words_per_token) / scalar(atlas_productivity_read_wpm) / 60) + (sum(atlas_vllm_completion_tokens_total{job=\"atlas-n8n\"}) * scalar(atlas_productivity_words_per_token) / scalar(atlas_productivity_write_wpm) / 60)) / scalar(atlas_productivity_hours_per_day))",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "vLLM share (days)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Build work only: authoring lines plus consuming tool output. ALL-TIME, both systems combined, ignoring the time picker. vLLM (hermes judges classifying text) valued via tokens->words->reading/writing time; Claude Code valued via lines authored plus output consumed. Different units of work, both converted to human-equivalent time, then summed. vLLM history begins 2026-08-03 (n8n retention); Claude Code begins 2026-07-09.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#b877d9",
+            "mode": "fixed"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#b877d9",
+                "value": null
+              }
+            ]
+          },
+          "unit": "d"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 6
+      },
+      "id": 323,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "(((sum(claude_lines_produced{kind=~\"written|added\"}) / scalar(atlas_productivity_lines_per_hour)) + ((sum(claude_chars_consumed{mode=\"read\"}) / scalar(atlas_productivity_chars_per_word) / scalar(atlas_productivity_read_wpm) / 60) + (sum(claude_chars_consumed{mode=\"skim\"}) / scalar(atlas_productivity_chars_per_word) / scalar(atlas_productivity_skim_wpm) / 60))) / scalar(atlas_productivity_hours_per_day))",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Claude Code share (days)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
       "id": 110,
       "panels": [],
       "title": "All-time \u2014 lifetime totals (does NOT follow the time picker)",
@@ -46,7 +852,7 @@
         "h": 5,
         "w": 4,
         "x": 0,
-        "y": 1
+        "y": 12
       },
       "id": 100,
       "options": {
@@ -111,7 +917,7 @@
         "h": 5,
         "w": 4,
         "x": 4,
-        "y": 1
+        "y": 12
       },
       "id": 101,
       "options": {
@@ -176,7 +982,7 @@
         "h": 5,
         "w": 4,
         "x": 8,
-        "y": 1
+        "y": 12
       },
       "id": 102,
       "options": {
@@ -241,7 +1047,7 @@
         "h": 5,
         "w": 4,
         "x": 12,
-        "y": 1
+        "y": 12
       },
       "id": 103,
       "options": {
@@ -306,7 +1112,7 @@
         "h": 5,
         "w": 4,
         "x": 16,
-        "y": 1
+        "y": 12
       },
       "id": 104,
       "options": {
@@ -346,7 +1152,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 17
       },
       "id": 111,
       "panels": [],
@@ -384,7 +1190,7 @@
         "h": 5,
         "w": 4,
         "x": 0,
-        "y": 7
+        "y": 18
       },
       "id": 1,
       "options": {
@@ -448,7 +1254,7 @@
         "h": 5,
         "w": 4,
         "x": 4,
-        "y": 7
+        "y": 18
       },
       "id": 2,
       "options": {
@@ -512,7 +1318,7 @@
         "h": 5,
         "w": 4,
         "x": 8,
-        "y": 7
+        "y": 18
       },
       "id": 3,
       "options": {
@@ -576,7 +1382,7 @@
         "h": 5,
         "w": 4,
         "x": 12,
-        "y": 7
+        "y": 18
       },
       "id": 4,
       "options": {
@@ -640,7 +1446,7 @@
         "h": 5,
         "w": 4,
         "x": 16,
-        "y": 7
+        "y": 18
       },
       "id": 5,
       "options": {
@@ -671,69 +1477,6 @@
         }
       ],
       "title": "Estimated value (USD)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "#52514e",
-            "mode": "fixed"
-          },
-          "decimals": 2,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#52514e",
-                "value": null
-              }
-            ]
-          },
-          "unit": "currencyUSD"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 20,
-        "y": 7
-      },
-      "id": 6,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
-          },
-          "editorMode": "code",
-          "expr": "atlas_productivity_rate_usd_per_hour",
-          "instant": true,
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Rate ($/hr, live gauge)",
       "type": "stat"
     },
     {
@@ -790,7 +1533,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 12
+        "y": 23
       },
       "id": 10,
       "options": {
@@ -910,7 +1653,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 12
+        "y": 23
       },
       "id": 11,
       "options": {
@@ -1022,7 +1765,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 21
+        "y": 32
       },
       "id": 20,
       "options": {
@@ -1183,7 +1926,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 21
+        "y": 32
       },
       "id": 21,
       "options": {
@@ -1286,7 +2029,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 41
       },
       "id": 30,
       "options": {
@@ -1359,6 +2102,498 @@
         }
       ],
       "type": "barchart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "id": 210,
+      "panels": [],
+      "title": "Claude Code \u2014 build work, all-time (does NOT follow the time picker)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "ALL-TIME. Claude Code build work, measured from transcripts synced to the NAS (scrubbed of credentials on the laptop before upload). Counted directly from Edit/Write tool inputs -- actual lines, not estimated from tokens. Ignores the dashboard time picker. Dedupe: tool_use_id for work, requestId for tokens.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#2a78d6",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#2a78d6",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 52
+      },
+      "id": 200,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "sum(claude_lines_produced{kind=~\"written|added\"})",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "All-time lines produced",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "ALL-TIME. Claude Code build work, measured from transcripts synced to the NAS (scrubbed of credentials on the laptop before upload). Counted directly from Edit/Write tool inputs -- actual lines, not estimated from tokens. Ignores the dashboard time picker. Dedupe: tool_use_id for work, requestId for tokens.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#1baf7a",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#1baf7a",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 52
+      },
+      "id": 201,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "claude_files_touched",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Files touched",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "ALL-TIME. Claude Code build work, measured from transcripts synced to the NAS (scrubbed of credentials on the laptop before upload). Counted directly from Edit/Write tool inputs -- actual lines, not estimated from tokens. Ignores the dashboard time picker. Dedupe: tool_use_id for work, requestId for tokens.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#1baf7a",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#1baf7a",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 52
+      },
+      "id": 202,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "claude_sessions",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Sessions",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "ALL-TIME. Human-equivalent time to AUTHOR the lines Claude produced, at atlas_productivity_lines_per_hour. One assumption, against the vLLM tiles' three.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#eda100",
+            "mode": "fixed"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#eda100",
+                "value": null
+              }
+            ]
+          },
+          "unit": "h"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 52
+      },
+      "id": 203,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "(sum(claude_lines_produced{kind=~\"written|added\"}) / scalar(atlas_productivity_lines_per_hour))",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Authoring hours (human-equiv)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "ALL-TIME. Human-equivalent time to CONSUME what Claude read. Read/WebFetch/WebSearch output is valued at atlas_productivity_read_wpm; Bash/Grep/Glob output at the faster atlas_productivity_skim_wpm, because command output is skimmed for the failure line rather than read word for word (it is ~54% of all consumed characters).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#eda100",
+            "mode": "fixed"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#eda100",
+                "value": null
+              }
+            ]
+          },
+          "unit": "h"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 52
+      },
+      "id": 204,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "((sum(claude_chars_consumed{mode=\"read\"}) / scalar(atlas_productivity_chars_per_word) / scalar(atlas_productivity_read_wpm) / 60) + (sum(claude_chars_consumed{mode=\"skim\"}) / scalar(atlas_productivity_chars_per_word) / scalar(atlas_productivity_skim_wpm) / 60))",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Reading hours (human-equiv)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "ALL-TIME. Human-equivalent time to AUTHOR the lines Claude produced, at atlas_productivity_lines_per_hour. One assumption, against the vLLM tiles' three. Combined authoring + reading time at the loaded labor rate.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#008300",
+            "mode": "fixed"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#008300",
+                "value": null
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 52
+      },
+      "id": 205,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "(((sum(claude_lines_produced{kind=~\"written|added\"}) / scalar(atlas_productivity_lines_per_hour)) + ((sum(claude_chars_consumed{mode=\"read\"}) / scalar(atlas_productivity_chars_per_word) / scalar(atlas_productivity_read_wpm) / 60) + (sum(claude_chars_consumed{mode=\"skim\"}) / scalar(atlas_productivity_chars_per_word) / scalar(atlas_productivity_skim_wpm) / 60))) * scalar(atlas_productivity_rate_usd_per_hour))",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Estimated value (USD)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "RANGE-SCOPED: follows the time picker, unlike the tiles above. delta() not increase() -- these are gauges recomputed from a full rescan, not monotonic counters.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 35,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 8,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#2a78d6",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "id": 206,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "sum(delta(claude_lines_produced{kind=~\"written|added\"}[1d]))",
+          "legendFormat": "lines/day",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Lines produced per day (range-scoped)",
+      "type": "timeseries"
     }
   ],
   "refresh": "1m",
@@ -1408,5 +2643,5 @@
   "timezone": "America/Denver",
   "title": "Atlas \u2014 Token Spend & Productivity",
   "uid": "atlas-token-spend",
-  "version": 3
+  "version": 5
 }

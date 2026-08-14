@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nwilliams.claude-transcript-sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/nwilliams/.local/bin/claude-transcript-sync.py</string>
+    </array>
+
+    <!-- Hourly. The run is incremental (mtime+size state file), so a no-op
+         run costs one directory walk and exits without touching the network. -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <!-- Not at load: don't fire on every login/reboot, the hourly tick is enough. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/nwilliams/Library/Logs/claude-transcript-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/nwilliams/Library/Logs/claude-transcript-sync.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+</dict>
+</plist>
